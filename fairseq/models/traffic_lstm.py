@@ -36,7 +36,7 @@ class LSTMModel(FairseqEncoderDecoderModel):
         decoder = TrafficLSTMDecoder()
         return cls(encoder, decoder)
     
-    # def forward(self, src_tokens, src_lengths, prev_output_tokens, **kwargs):
+    # def forward(self, src_tokens,  prev_output_tokens, **kwargs):#src_lengths,
     #     """
     #     Run the forward pass for an encoder-decoder model.
 
@@ -59,12 +59,13 @@ class LSTMModel(FairseqEncoderDecoderModel):
     #             - the decoder's output of shape `(batch, tgt_len, vocab)`
     #             - a dictionary with any model-specific outputs
     #     """
-    #     encoder_out = self.encoder(src_tokens, src_lengths=src_lengths, **kwargs)
+    #     encoder_out = self.encoder(src_tokens, **kwargs) # src_lengths=src_lengths,
     #     decoder_out = self.decoder(prev_output_tokens, encoder_out=encoder_out, **kwargs)
         
-    #     negatives = self.sample_negatives(decoder_out)
-    #     y = decoder_out.unsqueeze(0)
-    #     targets = torch.cat([y, negatives], dim=0)
+    #     # negatives = self.sample_negatives(decoder_out)
+    #     # y = decoder_out.unsqueeze(0)
+    #     # targets = torch.cat([y, negatives], dim=0)
+    #     print(decoder_out.size())
         
     #     return decoder_out
 
@@ -72,10 +73,11 @@ class LSTMModel(FairseqEncoderDecoderModel):
 class TrafficLSTMEncoder(FairseqEncoder):
     """LSTM encoder."""
     def __init__(
-        self, input_size=85, hidden_size=512, num_layers=1,
-        seq_len = 360,num_segments = 17,num_var_per_segment = 5,
+        self, hidden_size=512, num_layers=1, #input_size=90,
+        seq_len = 360,num_segments = 18,num_var_per_segment = 5,
         dropout_in=0.1, dropout_out=0.1, bidirectional=False,padding_value=0):
         super().__init__(dictionary=None)
+        
         self.num_layers = num_layers
         self.dropout_in = dropout_in
         self.dropout_out = dropout_out
@@ -86,11 +88,11 @@ class TrafficLSTMEncoder(FairseqEncoder):
         self.num_segments = num_segments
         self.num_var_per_segment = num_var_per_segment
 
-        self.input_size = input_size
-        self.output_units = input_size
+        self.input_size = num_segments * num_var_per_segment
+        self.output_units = self.input_size
 
         self.lstm = LSTM(
-            input_size=input_size,
+            input_size=self.input_size,
             hidden_size=self.output_units,
             num_layers=num_layers,
             dropout=self.dropout_out if num_layers > 1 else 0.,
@@ -98,12 +100,15 @@ class TrafficLSTMEncoder(FairseqEncoder):
         )
 
         self.padding_value = padding_value
+        # from fairseq import pdb; pdb.set_trace()
 
         if bidirectional:
             self.output_units *= 2
 
-    def forward(self, input_x, src_lengths):#input_x,
-
+    def forward(self, src_tokens, src_lengths):#def forward(self, input_x):#input_x,
+        
+        input_x = src_tokens
+        # from fairseq import pdb; pdb.set_trace()
         bsz, one_sample_length = input_x.size()
         
         one_timestep_size = self.num_segments*self.num_var_per_segment
@@ -111,11 +116,11 @@ class TrafficLSTMEncoder(FairseqEncoder):
         assert one_sample_length == self.seq_len*one_timestep_size
 
         x = input_x.view(-1,self.seq_len,one_timestep_size).float()
-        print("x_mean volume",x[:,:,::5].mean())
-        print("x_mean occupancy",x[:,:,1::5].mean())
-        print("x_mean speed",x[:,:,2::5].mean())
-        print("x_mean rin",x[:,:,3::5].mean())
-        print("x_mean rout",x[:,:,4::5].mean())
+        #print("x_mean volume",x[:,:,::5].mean())
+        #print("x_mean occupancy",x[:,:,1::5].mean())
+        #print("x_mean speed",x[:,:,2::5].mean())
+        #print("x_mean rin",x[:,:,3::5].mean())
+        #print("x_mean rout",x[:,:,4::5].mean())
         
         # x = F.dropout(x, p=self.dropout_in, training=self.training)
         # print("x2",x.size())
@@ -123,10 +128,10 @@ class TrafficLSTMEncoder(FairseqEncoder):
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 
-        print("x3",x.size())
+        # print("x3",x.size())
 
         x_mask = x > 1e-6 #BUG
-        print("x_mask",x_mask.size())
+        # print("x_mask",x_mask.size())
 
         # apply LSTM
         if self.bidirectional:
@@ -141,7 +146,7 @@ class TrafficLSTMEncoder(FairseqEncoder):
         c0 = x.new_zeros(*state_size)
         lstm_outs, (final_hiddens, final_cells) = self.lstm(x, (h0, c0))
 
-        print("lstm_outs",lstm_outs.size())
+        # print("lstm_outs",lstm_outs.size())
 
         x = lstm_outs
 
@@ -163,26 +168,30 @@ class TrafficLSTMEncoder(FairseqEncoder):
 
         encoder_padding_mask = x_mask.sum(dim=2)<1 #BUG: need multidim mask
 
-        print("x",x.size())
-        print("final_hiddens",final_hiddens.size())
-        print("final_cells",final_cells.size())
+        # print("x",x.size())
+        # print("final_hiddens",final_hiddens.size())
+        # print("final_cells",final_cells.size())
 
-        # import fairseq.pdb as pdb; pdb.set_trace()
+        # from fairseq import pdb; pdb.set_trace()
 
+        # return {
+        #     'encoder_out': (x, final_hiddens, final_cells),
+        #     'encoder_padding_mask': encoder_padding_mask if encoder_padding_mask.any() else None
+        # }
         return {
             'encoder_out': (x, final_hiddens, final_cells),
             'encoder_padding_mask': encoder_padding_mask if encoder_padding_mask.any() else None
         }
 
-    # def reorder_encoder_out(self, encoder_out, new_order):
-    #     encoder_out['encoder_out'] = tuple(
-    #         eo.index_select(1, new_order)
-    #         for eo in encoder_out['encoder_out']
-    #     )
-    #     if encoder_out['encoder_padding_mask'] is not None:
-    #         encoder_out['encoder_padding_mask'] = \
-    #             encoder_out['encoder_padding_mask'].index_select(1, new_order)
-    #     return encoder_out
+    def reorder_encoder_out(self, encoder_out, new_order):
+        encoder_out['encoder_out'] = tuple(
+            eo.index_select(1, new_order)
+            for eo in encoder_out['encoder_out']
+        )
+        if encoder_out['encoder_padding_mask'] is not None:
+            encoder_out['encoder_padding_mask'] = \
+                encoder_out['encoder_padding_mask'].index_select(1, new_order)
+        return encoder_out
 
     def max_positions(self):
         """Maximum input length supported by the encoder."""
@@ -226,9 +235,10 @@ class AttentionLayer(nn.Module):
 class TrafficLSTMDecoder(FairseqIncrementalDecoder):
     """Traffic LSTM decoder."""
     def __init__(
-        self, input_size=85, hidden_size=512, output_size=85,
-        num_layers=1, dropout_in=0.1, dropout_out=0.1, attention=True,
-        encoder_output_units=512, pretrained_embed=None,
+        self, hidden_size=90, #input_size=90, output_size=90,
+        num_segments = 18,num_var_per_segment = 5, seq_len = 360,
+        num_layers=1, dropout_in=0.1, dropout_out=0.1, attention=False,
+        encoder_output_units=90, pretrained_embed=None,
         share_input_output_embed=False, adaptive_softmax_cutoff=None,
     ):
         super().__init__(dictionary=None)
@@ -237,6 +247,15 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
         self.hidden_size = hidden_size
         self.share_input_output_embed = share_input_output_embed
         self.need_attn = True
+
+        attention=False
+        self.need_attn = False#True
+
+        attention=False
+
+        self.input_size = num_segments * num_var_per_segment
+        self.output_size = self.input_size
+        self.seq_len = seq_len
 
         self.adaptive_softmax = None
 
@@ -248,7 +267,7 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
             self.encoder_hidden_proj = self.encoder_cell_proj = None
         self.layers = nn.ModuleList([
             LSTMCell(
-                input_size=hidden_size + input_size if layer == 0 else hidden_size,
+                input_size=hidden_size + self.input_size if layer == 0 else hidden_size,
                 hidden_size=hidden_size,
             )
             for layer in range(num_layers)
@@ -258,25 +277,27 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
             self.attention = AttentionLayer(hidden_size, encoder_output_units, hidden_size, bias=False)
         else:
             self.attention = None
-        if hidden_size != output_size:
-            self.additional_fc = Linear(hidden_size, output_size)
+        if hidden_size != self.output_size:
+            self.additional_fc = Linear(hidden_size, self.output_size)
         # if adaptive_softmax_cutoff is not None:
         #     # setting adaptive_softmax dropout to dropout_out for now but can be redefined
         #     self.adaptive_softmax = AdaptiveSoftmax(num_embeddings, hidden_size, adaptive_softmax_cutoff,
         #                                             dropout=dropout_out)
         # elif not self.share_input_output_embed:
             # self.fc_out = Linear(out_embed_dim, num_embeddings, dropout=dropout_out)
-            self.fc_out = Linear(output_size, output_size, dropout=dropout_out)
+        self.fc_out = Linear(self.output_size, self.output_size, dropout=dropout_out)
 
     def forward(self, prev_output_tokens, encoder_out, incremental_state=None):
+    #def forward(self, prev_output_tokens, encoder_out, incremental_state=None):
         encoder_padding_mask = encoder_out['encoder_padding_mask']
         encoder_out = encoder_out['encoder_out']
 
         if incremental_state is not None:
             # prev_output_tokens = prev_output_tokens[:, -1:]
             prev_output_tokens = prev_output_tokens[:, -1:,:]
-        bsz, seqlen = prev_output_tokens.size()
-        seqlen = 360
+        bsz, one_input_size = prev_output_tokens.size()
+        # self.seq_len = 360
+        seqlen = self.seq_len
         # bsz, seqlen, segment_units = prev_output_tokens.size()
 
         # get outputs from encoder
@@ -285,7 +306,9 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
 
         # embed tokens
         # x = self.embed_tokens(prev_output_tokens)
-        x = prev_output_tokens.view(-1,360,85).float()
+        
+        x = prev_output_tokens.view(-1,self.seq_len,self.input_size).float()
+        # print(x.size())
         # x = F.dropout(x, p=self.dropout_in, training=self.training)
 
         # B x T x C -> T x B x C
@@ -308,7 +331,7 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
         outs = []
         
         for j in range(seqlen):
-            
+            #from fairseq import pdb; pdb.set_trace()
             # input feeding: concatenate context vector from previous time step
             input = torch.cat((x[j, :, :], input_feed), dim=1)
 

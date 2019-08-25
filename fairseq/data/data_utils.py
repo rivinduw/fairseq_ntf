@@ -139,6 +139,7 @@ def filter_by_size(indices, size_fn, max_positions, raise_exception=False):
             any elements are filtered (default: False).
     """
     def check_size(idx):
+        # print(size_fn(idx))
         if isinstance(max_positions, float) or isinstance(max_positions, int):
             return size_fn(idx) <= max_positions
         elif isinstance(max_positions, dict):
@@ -150,7 +151,11 @@ def filter_by_size(indices, size_fn, max_positions, raise_exception=False):
                     for a, b in zip(idx_size[key], max_positions[key]))
                 for key in intersect_keys
             )
+        elif isinstance(max_positions, tuple):
+            return size_fn(idx) <= max_positions[0]
         else:
+            # print(size_fn(idx))
+            # from fairseq import pdb; pdb.set_trace()
             # Hacky as heck, for the specific case of multilingual training with RoundRobin.
             if isinstance(size_fn(idx), dict) and isinstance(max_positions, tuple):
                 return all(

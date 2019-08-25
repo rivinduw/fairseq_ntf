@@ -26,17 +26,18 @@ class TrafficPredictionTask(FairseqTask):
             segment_lengths = f.read().splitlines()
         print('| segment_lengths_file had {} segments'.format(len(segment_lengths)))
 
-        return TrafficPredictionTask(args,segment_lengths)
+        return TrafficPredictionTask(args)
 
-    def __init__(self, args, segment_lengths):
+    def __init__(self, args):
         super().__init__(args)
-        self.segment_lengths = segment_lengths
+        # self.segment_lengths = segment_lengths
 
     def load_dataset(self, split, **kwargs):
         """Load a given dataset split (e.g., train, valid, test)."""
 
-        data_file = os.path.join(self.args.data, '{}.csv'.format('fakedata'))#split))
-        self.datasets[split] = TrafficDataset(data_file,seq_len=360, train_size=4800,vol_multiple = 120.0)
+        data_file = os.path.join(self.args.data, '{}.csv'.format('november_raw'))#split))
+        self.datasets[split] = TrafficDataset(data_file,seq_len=360, train_size=48000,vol_multiple = 1.0)
+        
         print('| {} {} {} examples'.format(self.args.data, split, len(self.datasets[split])))
         
 
@@ -46,10 +47,10 @@ class TrafficPredictionTask(FairseqTask):
         # has max length 1.
         return (self.args.max_positions, 1)
 
-    @property
-    def source_dictionary(self):
-        """Return the source :class:`~fairseq.data.Dictionary`."""
-        return None#self.input_vocab
+    # @property
+    # def source_dictionary(self):
+    #     """Return the source :class:`~fairseq.data.Dictionary`."""
+    #     return None#self.input_vocab
 
     @property
     def target_dictionary(self):
