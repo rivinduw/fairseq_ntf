@@ -27,7 +27,7 @@ class TrafficDataset(FairseqDataset):
         
 
         self.train_size = train_size
-        self.all_data = pd.read_csv(csv_file,index_col=0,nrows=train_size)
+        self.all_data = pd.read_csv(csv_file,index_col=0)
         self.all_data.iloc[:,::5] = self.all_data.iloc[:,::5] * vol_multiple
         
         self.scale_input = scale_input

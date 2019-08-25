@@ -35,8 +35,9 @@ class TrafficPredictionTask(FairseqTask):
     def load_dataset(self, split, **kwargs):
         """Load a given dataset split (e.g., train, valid, test)."""
 
-        data_file = os.path.join(self.args.data, '{}.csv'.format('november_raw'))#split))
-        self.datasets[split] = TrafficDataset(data_file,seq_len=360, train_size=48000,vol_multiple = 1.0)
+        self.seq_len = 360
+        data_file = os.path.join(self.args.data, '{}.csv'.format('triange_demand_5_10_15_20_x90'))#split))
+        self.datasets[split] = TrafficDataset(data_file,seq_len=self.seq_len, train_size=48000,vol_multiple = 120.0)
         
         print('| {} {} {} examples'.format(self.args.data, split, len(self.datasets[split])))
         
@@ -45,7 +46,7 @@ class TrafficPredictionTask(FairseqTask):
         """Return the max input length allowed by the task."""
         # The source should be less than *args.max_positions* and the "target"
         # has max length 1.
-        return (self.args.max_positions, 1)
+        return (1e5)#(self.args.max_positions*self.seq_len, 1)
 
     # @property
     # def source_dictionary(self):

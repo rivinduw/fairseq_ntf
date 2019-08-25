@@ -18,6 +18,8 @@ from fairseq.data import iterators
 from fairseq.trainer import Trainer
 from fairseq.meters import AverageMeter, StopwatchMeter
 
+import wandb
+wandb.init(project="first-fairseq-project")
 
 def main(args, init_distributed=False):
     utils.import_user_module(args)
@@ -133,6 +135,8 @@ def train(args, trainer, task, epoch_itr):
             stats[k] = extra_meters[k].avg
         progress.log(stats, tag='train', step=stats['num_updates'])
 
+        
+
         # ignore the first mini-batch in words-per-second calculation
         if i == 0:
             trainer.get_meter('wps').reset()
@@ -152,6 +156,7 @@ def train(args, trainer, task, epoch_itr):
 
     # log end-of-epoch stats
     stats = get_training_stats(trainer)
+    wandb.log(stats)
     for k, meter in extra_meters.items():
         stats[k] = meter.avg
     progress.print(stats, tag='train', step=stats['num_updates'])
@@ -233,6 +238,7 @@ def validate(args, trainer, task, epoch_itr, subsets):
 
         # log validation stats
         stats = get_valid_stats(trainer, args, extra_meters)
+        wandb.log(stats)
         for k, meter in extra_meters.items():
             stats[k] = meter.avg
         progress.print(stats, tag=subset, step=trainer.get_num_updates())

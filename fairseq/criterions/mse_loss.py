@@ -46,8 +46,9 @@ class MSECriterion(FairseqCriterion):
         loss = F.mse_loss(
             lprobs*target_mask.float(), 
             target*target_mask.float(),
-            reduction='mean'
+            reduction='sum'
             )
+        loss = loss / target_mask.sum()
         # loss = F.nll_loss(
         #     lprobs,
         #     target,
