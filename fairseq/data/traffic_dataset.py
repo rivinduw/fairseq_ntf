@@ -13,7 +13,11 @@ import torch.nn.functional as F
 import pandas as pd
 import itertools
 
+import wandb
+
 from . import FairseqDataset
+
+from itertools import cycle, islice
 
 #TODO: Delete train_size
 
@@ -72,35 +76,43 @@ class TrafficDataset(FairseqDataset):
         return F.interpolate(x.view(1, 1, -1), scale_factor=factor).squeeze()
 
     def __len__(self):
-        return len(self.all_data) // self.seq_len - 1
+        return len(self.all_data.iloc[:self.train_size,:]) // self.seq_len# - 2 * self.seq_len - 1
 
     def collater(self, samples):
         if len(samples) == 0:
             return {}
         id = torch.LongTensor([s['id'] for s in samples])
-        src_tokens = torch.LongTensor([s['source'] for s in samples])
+        src_tokens = torch.FloatTensor([s['source'] for s in samples])
         src_lengths = torch.LongTensor([len(s['source']) for s in samples])
 
-        prev_output_tokens = None
-        target = None
-        if samples[0].get('target', None) is not None:
-            target = torch.LongTensor([s['target'] for s in samples])
-            ntokens = sum(len(s['target']) for s in samples)
+        target = torch.FloatTensor([s['target'] for s in samples])
+        ntokens = sum(len(s['target']) for s in samples)
+        max_list = list(islice(cycle(self.max_vals), 32400))
+        # from fairseq import pdb; pdb.set_trace();
+        
+        previous_output = [max_list*samples[-1]['source']] + [s['target'] for s in samples[:-1]]
+        prev_output_tokens = torch.FloatTensor(previous_output)
 
-            if self.input_feeding:
-                # we create a shifted version of targets for feeding the
-                # previous output token(s) into the next decoder step
-                # previous_output = itertools.chain([samples[-1]['source']],[s['target'] for s in samples[:-1]])
-                previous_output = [samples[-1]['source']] + [s['target'] for s in samples[:-1]]
-                prev_output_tokens = torch.LongTensor(previous_output)
-                # prev_output_tokens = merge(
-                #     'target',
-                #     left_pad=left_pad_target,
-                #     move_eos_to_beginning=True,
-                # )
-                # prev_output_tokens = prev_output_tokens.index_select(0, sort_order)
-        else:
-            ntokens = sum(len(s['source']) for s in samples)
+        # prev_output_tokens = None
+        # target = None
+        # if samples[0].get('target', None) is not None:
+        #     target = torch.FloatTensor([s['target'] for s in samples])
+        #     ntokens = sum(len(s['target']) for s in samples)
+
+        #     if self.input_feeding:
+        #         # we create a shifted version of targets for feeding the
+        #         # previous output token(s) into the next decoder step
+        #         # previous_output = itertools.chain([samples[-1]['source']],[s['target'] for s in samples[:-1]])
+        #         previous_output = [self.max_vals*samples[-1]['source']] + [s['target'] for s in samples[:-1]]
+        #         prev_output_tokens = torch.FloatTensor(previous_output)
+        #         # prev_output_tokens = merge(
+        #         #     'target',
+        #         #     left_pad=left_pad_target,
+        #         #     move_eos_to_beginning=True,
+        #         # )
+        #         # prev_output_tokens = prev_output_tokens.index_select(0, sort_order)
+        # else:
+        #     ntokens = sum(len(s['source']) for s in samples)
         batch = {
             'id': id,
             'nsentences': len(samples),

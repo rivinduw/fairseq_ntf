@@ -4,6 +4,12 @@ from fairseq.tasks import FairseqTask, register_task
 
 from fairseq.data import TrafficDataset
 
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# python train.py data --task traffic_prediction --arch lstm_traffic --criterion mse_loss --batch-size 16
+# C:\Users\rwe180\Documents\python-scripts\pytorch\pyNTF\
+
 @register_task('traffic_prediction')
 class TrafficPredictionTask(FairseqTask):
 
@@ -30,6 +36,7 @@ class TrafficPredictionTask(FairseqTask):
 
     def __init__(self, args):
         super().__init__(args)
+        self.valid_step_num = 0
         # self.segment_lengths = segment_lengths
 
     def load_dataset(self, split, **kwargs):
@@ -46,7 +53,7 @@ class TrafficPredictionTask(FairseqTask):
         """Return the max input length allowed by the task."""
         # The source should be less than *args.max_positions* and the "target"
         # has max length 1.
-        return (1e5)#(self.args.max_positions*self.seq_len, 1)
+        return (1e5,1)#(self.args.max_positions*self.seq_len, 1)
 
     # @property
     # def source_dictionary(self):
@@ -57,6 +64,38 @@ class TrafficPredictionTask(FairseqTask):
     def target_dictionary(self):
         """Return the target :class:`~fairseq.data.Dictionary`."""
         return None#self.label_vocab
+
+    def valid_step(self, sample, model, criterion):
+        model.eval()
+        self.valid_step_num += 1
+        with torch.no_grad():
+            loss, sample_size, logging_output = criterion(model, sample)
+            if self.valid_step_num%10 == 0:
+                net_output = model(**sample['net_input'])
+                print("****")
+                # plt.ion()
+                # plt.pause(0.1)
+                # plt.close('all')
+                # plt.pause(0.1)
+                print(net_output[0].size())
+                
+                preds = net_output[0].detach().cpu().numpy()#[0,:,0]#model.get_normalized_probs(net_output, log_probs=True).float()
+                src = sample['net_input']['src_tokens'].view(-1,360,90).detach().cpu().numpy()#[0,:,0]# model.get_targets(sample, net_output).float()
+                target = sample['target'].view(-1,360,90).detach().cpu().numpy()
+                for i in range(2):
+                    for seg in range(10):
+                        ax = pd.DataFrame(preds[i,:,seg*5]).plot()
+                        pd.DataFrame(target[i,:,seg*5]).plot(ax=ax)
+                        plt.title(str(i)+"***"+str(seg))
+                        plt.pause(0.1)
+                        plt.show(block=False)
+                        plt.pause(3.0)
+                        plt.pause(0.1)
+                    plt.pause(2.0)
+                    plt.close('all')
+                plt.pause(5.0)
+                plt.close('all')
+        return loss, sample_size, logging_output
 
     # We could override this method if we wanted more control over how batches
     # are constructed, but it's not necessary for this tutorial since we can

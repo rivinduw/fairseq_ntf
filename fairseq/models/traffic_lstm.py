@@ -237,7 +237,7 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
     def __init__(
         self, hidden_size=90, #input_size=90, output_size=90,
         num_segments = 18,num_var_per_segment = 5, seq_len = 360,
-        num_layers=1, dropout_in=0.1, dropout_out=0.1, attention=False,
+        num_layers=1, dropout_in=0.1, dropout_out=0.1, attention=True,
         encoder_output_units=90, pretrained_embed=None,
         share_input_output_embed=False, adaptive_softmax_cutoff=None,
     ):
@@ -248,8 +248,8 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
         self.share_input_output_embed = share_input_output_embed
         self.need_attn = True
 
-        attention=False
-        self.need_attn = False#True
+        # attention=False
+        # self.need_attn = False#True
 
         attention=False
 
@@ -384,10 +384,15 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
                 x = F.dropout(x, p=self.dropout_out, training=self.training)
             if self.share_input_output_embed:
                 x = F.linear(x, self.embed_tokens.weight)
-            else:
-                x = self.fc_out(x)
+            # else:
+            #     x = self.fc_out(x)
         # import fairseq.pdb as pdb; pdb.set_trace()#[:,-1,:]
+        x = self.fc_out(x)
         return x, attn_scores
+    
+    #my implementation
+    def get_normalized_probs(self, net_output, log_probs=None, sample=None):
+        return net_output[0]
 
     def reorder_incremental_state(self, incremental_state, new_order):
         super().reorder_incremental_state(incremental_state, new_order)
