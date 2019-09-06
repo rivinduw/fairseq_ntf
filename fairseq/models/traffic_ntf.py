@@ -18,9 +18,11 @@ from fairseq.models import (
 from fairseq.modules import AdaptiveSoftmax
 
 import random
+import wandb
 
-@register_model('lstm_traffic')
-class LSTMModel(FairseqEncoderDecoderModel):
+
+@register_model('NTF_traffic')
+class NTFModel(FairseqEncoderDecoderModel):
     def __init__(self, encoder, decoder):
         super().__init__(encoder, decoder)
 
@@ -34,8 +36,8 @@ class LSTMModel(FairseqEncoderDecoderModel):
     def build_model(cls, args, task):
         """Build a new model instance."""
         max_vals = task.get_max_vals()
-        encoder = TrafficLSTMEncoder()
-        decoder = TrafficLSTMDecoder(max_vals=max_vals)
+        encoder = TrafficNTFEncoder()
+        decoder = TrafficNTFDecoder(max_vals=max_vals)
         return cls(encoder, decoder)
     
     # def forward(self, src_tokens,  prev_output_tokens, **kwargs):#src_lengths,
@@ -72,8 +74,8 @@ class LSTMModel(FairseqEncoderDecoderModel):
     #     return decoder_out
 
 
-class TrafficLSTMEncoder(FairseqEncoder):
-    """LSTM encoder."""
+class TrafficNTFEncoder(FairseqEncoder):
+    """NTF encoder."""
     def __init__(
         self, hidden_size=512, num_layers=1, #input_size=90,
         seq_len = 360,num_segments = 18,num_var_per_segment = 5,
@@ -234,16 +236,19 @@ class AttentionLayer(nn.Module):
         return x, attn_scores
 
 
-class TrafficLSTMDecoder(FairseqIncrementalDecoder):
-    """Traffic LSTM decoder."""
+class TrafficNTFDecoder(FairseqIncrementalDecoder):
+    """Traffic NTF decoder."""
     def __init__(
         self, hidden_size=90, #input_size=90, output_size=90,
         num_segments = 18,num_var_per_segment = 5, seq_len = 360,
         num_layers=1, dropout_in=0.1, dropout_out=0.1, attention=True,
         encoder_output_units=90, pretrained_embed=None,
-        share_input_output_embed=False, adaptive_softmax_cutoff=None,max_vals=None
+        share_input_output_embed=False, adaptive_softmax_cutoff=None, max_vals = None
     ):
         super().__init__(dictionary=None)
+        
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
         self.dropout_in = dropout_in
         self.dropout_out = dropout_out
         self.hidden_size = hidden_size
@@ -253,26 +258,28 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
         # attention=False
         # self.need_attn = False#True
 
+        self.max_vals = torch.Tensor(max_vals).to(self.device)
+
         #attention=False
-        self.max_vals = max_vals
-        #import pdb; pdb.set_trace();
+        self.num_segments = num_segments
 
-
-        self.input_size = num_segments * num_var_per_segment
+        self.input_size = self.num_segments * num_var_per_segment
         self.output_size = self.input_size
         self.seq_len = seq_len
 
         self.adaptive_softmax = None
 
         self.encoder_output_units = encoder_output_units
+
         if encoder_output_units != hidden_size:
             self.encoder_hidden_proj = Linear(encoder_output_units, hidden_size)
             self.encoder_cell_proj = Linear(encoder_output_units, hidden_size)
         else:
             self.encoder_hidden_proj = self.encoder_cell_proj = None
+        
         self.layers = nn.ModuleList([
             LSTMCell(
-                input_size=hidden_size + self.input_size if layer == 0 else hidden_size,
+                input_size=self.input_size if layer == 0 else hidden_size,#hidden_size + 
                 hidden_size=hidden_size,
             )
             for layer in range(num_layers)
@@ -290,7 +297,24 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
         #                                             dropout=dropout_out)
         # elif not self.share_input_output_embed:
             # self.fc_out = Linear(out_embed_dim, num_embeddings, dropout=dropout_out)
-        self.fc_out = Linear(self.output_size, self.output_size, dropout=dropout_out)
+        
+        
+
+        self.segment_fixed = torch.Tensor([[582.0/1000.,3.],[318.0/1000.,4.],[703.0/1000.,4.],[ 387.0/1000.,4.],[ 300.0/1000.,5.],[ 348.0/1000.,5.],[ 375.0/1000.,4.],[ 300.0/1000.,4.],[ 257.0/1000.,4.],[ 500.0/1000.,4.],[ 484.0/1000.,4.],[ 400.0/1000.,3.],[ 420.0/1000.,3.],[ 589.0/1000.,3.],[ 427./1000.,3.],[ 400.0/1000.,2.],[ 515.0/1000.,2.0],[ 495.0/1000.,3.0]]).to(self.device)#torch.Tensor(self.num_segments, 2)
+        self.model_fixed = torch.Tensor([[10./3600.,17./3600.,23.,1.7,13.]]).to(self.device)
+
+        num_boundry = 3
+        num_model_params=8
+        self.ntf_vars = num_model_params*self.num_segments+num_boundry
+        self.ntf_projection = nn.Linear(self.output_size, self.ntf_vars)
+
+        self.ntf_module = NTF_Module(num_segments=self.num_segments,\
+                                     segment_fixed = self.segment_fixed,\
+                                     model_fixed = self.model_fixed
+                                    )
+    
+        #self.fc_out = Linear(self.output_size, self.output_size, dropout=dropout_out)
+
 
     def forward(self, prev_output_tokens, encoder_out, incremental_state=None):
     #def forward(self, prev_output_tokens, encoder_out, incremental_state=None):
@@ -298,8 +322,10 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
         encoder_out = encoder_out['encoder_out']
 
         if incremental_state is not None:
+            print(prev_output_tokens.size())
             # prev_output_tokens = prev_output_tokens[:, -1:]
             prev_output_tokens = prev_output_tokens[:, -1:,:]
+            
         bsz, one_input_size = prev_output_tokens.size()
         # self.seq_len = 360
         seqlen = self.seq_len
@@ -338,7 +364,10 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
         for j in range(seqlen):
             #from fairseq import pdb; pdb.set_trace()
             # input feeding: concatenate context vector from previous time step
-            input = torch.cat((x[j, :, :], input_feed), dim=1)
+            if random.random()>0.0:
+                input = x[j, :, :]#torch.cat((x[j, :, :], input_feed), dim=1)
+            else:
+                input = input_feed
 
             for i, rnn in enumerate(self.layers):
                 # recurrent cell
@@ -356,10 +385,36 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
                 out, attn_scores[:, j, :] = self.attention(hidden, encoder_outs, encoder_padding_mask)
             else:
                 out = hidden
-            out = F.dropout(out, p=self.dropout_out, training=self.training)
+            #from fairseq import pdb; pdb.set_trace()
+            ntf_input = self.ntf_projection(out)
+            boundry_params, segment_params = torch.split(ntf_input, [3,8*self.num_segments],dim=1)
+            boundry_params = torch.Tensor([200.0,10000.0,200.0]).to(self.device)*torch.sigmoid(boundry_params)
+            segment_params = segment_params.view((-1,8,self.num_segments))
+            segment_params = torch.cat([torch.sigmoid(segment_params[:,:4,:]),torch.tanh(segment_params[:,4:,:])],dim=1)
+                                                            # vf, a, rhocr, g, omegar, omegas, epsq, epsv 
+            segment_params =  segment_params* torch.Tensor([[200.0],[2.0],[200.0],[5.0],[100.0],[100.0],[100.0],[10.0]]).to(self.device)
+            segment_params = segment_params.permute(0, 2, 1)
+            unscaled_input = input * self.max_vals
+
+            #print("boundry_params",boundry_params[0,::5].mean().item(),boundry_params.size())
+            #print("segment_params",segment_params[0,::5,0].mean().item(),segment_params.size())
+
+            out = self.ntf_module(unscaled_input,segment_params,boundry_params)
+
+            #print(out.mean().item())
+
+            out = out / self.max_vals
+
+            
+
+            #from fairseq import pdb; pdb.set_trace()
+
+            #out = F.dropout(out, p=self.dropout_out, training=self.training)
+
 
             # input feeding
             input_feed = out
+
 
             # save final output
             outs.append(out)
@@ -371,7 +426,9 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
         )
 
         # collect outputs across time steps
-        x = torch.cat(outs, dim=0).view(seqlen, bsz, self.hidden_size)
+        #print(torch.stack(outs, dim=0).size())
+        # from fairseq import pdb; pdb.set_trace()
+        x = torch.stack(outs, dim=0)#.view(seqlen, bsz, self.hidden_size)
 
         # T x B x C -> B x T x C
         x = x.transpose(1, 0)
@@ -391,8 +448,9 @@ class TrafficLSTMDecoder(FairseqIncrementalDecoder):
                 x = F.linear(x, self.embed_tokens.weight)
             # else:
             #     x = self.fc_out(x)
-        # import fairseq.pdb as pdb; pdb.set_trace()#[:,-1,:]
-        x = self.fc_out(x)
+        #import fairseq.pdb as pdb; pdb.set_trace()#[:,-1,:]
+        
+        x = x.contiguous().view(bsz,-1)#self.output_size)#self.fc_out(x)
         return x, attn_scores
     
     #my implementation
@@ -430,9 +488,11 @@ class NTF_Module(nn.Module):
         
         assert type(num_segments) == int, "num_segments needs to be an int and not "+str(type(num_segments))
         self.num_segments = num_segments
+
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         
-        self.segment_fixed = segment_fixed.view((self.num_segments, 2)).to(device)
-        self.model_fixed = model_fixed.view((1, 5)).to(device)
+        self.segment_fixed = segment_fixed.view((self.num_segments, 2)).to(self.device)
+        self.model_fixed = model_fixed.view((1, 5)).to(self.device)
         
         self.T, self.tau, self.nu, self.delta, self.kappa = torch.unbind(model_fixed, dim=1)
         self.Delta, self.lambda_var = torch.unbind(segment_fixed, dim=1)
@@ -472,15 +532,15 @@ class NTF_Module(nn.Module):
       v0, q0, rhoNp1 = torch.unbind(boundry_params, dim=2)
       vf, a, rhocr, g, omegar, omegas, epsq, epsv = torch.unbind(segment_params, dim=2)
       
-      rhocr = torch.clamp(rhocr, min=30, max=500)
+      #rhocr = torch.clamp(rhocr, min=30, max=500)
       try:
-        if random.random() > 0.999:
-            wandb.log({"vf": wandb.Histogram(vf)})
-            wandb.log({"a": wandb.Histogram(a)})
-            wandb.log({"rhocr": wandb.Histogram(rhocr)})
-            wandb.log({"g": wandb.Histogram(g)})
-            wandb.log({"omegar": wandb.Histogram(q0)})
-            wandb.log({"omegas": wandb.Histogram(rhoNp1)})
+        if random.random() > 0.99:
+            wandb.log({"vf": wandb.Histogram(vf.cpu().detach().numpy())})
+            wandb.log({"a": wandb.Histogram(a.cpu().detach().numpy())})
+            wandb.log({"rhocr": wandb.Histogram(rhocr.cpu().detach().numpy())})
+            wandb.log({"g": wandb.Histogram(g.cpu().detach().numpy())})
+            wandb.log({"omegar": wandb.Histogram(q0.cpu().detach().numpy())})
+            wandb.log({"omegas": wandb.Histogram(rhoNp1.cpu().detach().numpy())})
         # tb.add_histogram('vf', vf, epoch)
         # tb.add_histogram('a', a, epoch)
         # tb.add_histogram('rhocr', rhocr, epoch)
@@ -488,7 +548,7 @@ class NTF_Module(nn.Module):
         # tb.add_histogram('omegar', omegar, epoch)
         # tb.add_histogram('omegas', omegas, epoch)
       except Exception as e:
-        pass#print(e)
+        print(e)
       
       current_velocities = x[:,:,self.v_index]
       current_densities = x[:,:,self.rho_index]
@@ -496,12 +556,12 @@ class NTF_Module(nn.Module):
       next_densities = torch.cat([current_densities[:,1:],rhoNp1],dim=1)
 
       stat_speed = vf* torch.exp(torch.div(-1,a+TINY)*torch.pow(torch.div(current_densities,rhocr+TINY)+TINY,a))
-      if random.random() > 0.99999:
+      if random.random() > 0.9999:
         print("stat speed",stat_speed.size(),stat_speed.min().item(),stat_speed.mean().item(),stat_speed.max().item())
-      if random.random() > 0.999:
+      if random.random() > 0.99:
         print("v0,q0,rhoNN",v0[0].item(), q0[0].item(), rhoNp1[0].item(),v0.mean().item(), q0.mean().item(), rhoNp1.mean().item())
         print("q1",x[0,0,self.q_index].item(),x[:,0,self.q_index].mean().item())
-      if random.random() > 0.9995:
+      if random.random() > 0.995:
         print("vf, a, rhocr,g, omegar, omegas, epsq, epsv",vf[0].mean().item(), a[0].mean().item(), rhocr[0].mean().item(),g[0].mean().item(), omegar[0].mean().item(), omegas[0].mean().item(), epsq[0].mean().item(), epsv[0].mean().item())
 
       return current_velocities + (torch.div(self.T,self.tau+TINY)) * (stat_speed - current_velocities )  \
@@ -513,15 +573,15 @@ class NTF_Module(nn.Module):
     def future_rho(self,x,boundry_params):
       v0, q0, rhoNp1 = torch.unbind(boundry_params, dim=2)
       try:
-        if random.random() > 0.999:
-            wandb.log({"v0": wandb.Histogram(v0)})
-            wandb.log({"q0": wandb.Histogram(q0)})
-            wandb.log({"rhoNp1": wandb.Histogram(rhoNp1)})
+        if random.random() > 0.99:
+            wandb.log({"v0": wandb.Histogram(v0.cpu().detach().numpy())})
+            wandb.log({"q0": wandb.Histogram(q0.cpu().detach().numpy())})
+            wandb.log({"rhoNp1": wandb.Histogram(rhoNp1.cpu().detach().numpy())})
         # tb.add_histogram('v0', v0, epoch)
         # tb.add_histogram('q0', q0, epoch)
         # tb.add_histogram('rhoNp1', rhoNp1, epoch)
       except Exception as e:
-        pass#print(e)
+        print(e)
       
       current_flows = x[:,:,self.q_index]
       current_densities = x[:,:,self.rho_index]
@@ -536,16 +596,23 @@ class NTF_Module(nn.Module):
       x = x.view(-1,self.num_segments,5) #TODO: remove hardcode
       
       invalid_inputs_mask = (x<0).float()
-      invalid_input_defaults = torch.zeros_like(x).to(device)
+      invalid_input_defaults = torch.zeros_like(x).to(self.device)
       invalid_input_defaults[:,:,self.v_index] = 100.0
+      invalid_input_defaults[:,:,self.q_index] = 2000.0
+      invalid_input_defaults[:,:,self.rho_index] = 20.0
+
+      #print("xmean1",x.mean())
 
       x = x + invalid_inputs_mask*invalid_input_defaults
 
+      #print("xmean2",x.mean())
+      #import pdb; pdb.set_trace()
+
       
-      input_mask = torch.ones_like(x).to(device)#, dtype=torch.uint8).to(device)
-      input_mask[:,:,self.rho_index] = segment_params[:,:,self.g_index]
+      #input_mask = torch.ones_like(x).to(self.device)#, dtype=torch.uint8).to(self.device)
+      #input_mask[:,:,self.rho_index] = segment_params[:,:,self.g_index]
       
-      x = x*input_mask
+      #x = x*input_mask
 
       future_velocities = self.future_v(x,boundry_params,segment_params)
       future_densities = self.future_rho(x,boundry_params)
@@ -557,29 +624,33 @@ class NTF_Module(nn.Module):
       future_s = segment_params[:,:,self.omegas_index] + x[:,:,self.s_index]
       
       try:
-        if random.random() > 0.999:
-            wandb.log({"future_velocities": wandb.Histogram(future_velocities)})
-            wandb.log({"future_densities": wandb.Histogram(future_densities)})
-            wandb.log({"future_occupancies": wandb.Histogram(future_occupancies)})
-            wandb.log({"future_flows": wandb.Histogram(future_flows)})
-            wandb.log({"future_r": wandb.Histogram(future_r)})
+        if random.random() > 0.95:
+            wandb.log({"future_velocities": wandb.Histogram(future_velocities.cpu().detach().numpy())})
+            wandb.log({"future_densities": wandb.Histogram(future_densities.cpu().detach().numpy())})
+            wandb.log({"future_occupancies": wandb.Histogram(future_occupancies.cpu().detach().numpy())})
+            wandb.log({"future_flows": wandb.Histogram(future_flows.cpu().detach().numpy())})
+            wandb.log({"future_r": wandb.Histogram(future_r.cpu().cpu().detach().numpy())})
             # tb.add_histogram('future_velocities', future_velocities, epoch)
             # tb.add_histogram('future_densities', future_densities, epoch)
             # tb.add_histogram('future_occupancies', future_occupancies, epoch)
             # tb.add_histogram('future_flows', future_flows, epoch)
             # tb.add_histogram('future_r', future_r, epoch)
       except Exception as e:
-        pass
+        print(e)
 
       
       future_velocities = torch.clamp(future_velocities, min=5, max=200)
-      future_densities = torch.clamp(future_densities, min=1, max=100)
+      future_velocities = torch.clamp(future_densities, min=1, max=100)
       future_occupancies = torch.clamp(future_occupancies, min=1, max=20)
       future_flows = torch.clamp(future_flows, min=1, max=10000)
       future_r = torch.clamp(future_r, min=0, max=100)
       future_s = torch.clamp(future_s, min=0, max=100)
       
       one_stack =  torch.stack((future_flows,future_occupancies,future_velocities,future_r,future_s),dim=2)
+
+      #import pdb; pdb.set_trace()
+      one_stack[one_stack!=one_stack] =  1.
+
 
       return one_stack.view(-1,self.num_segments*5)
 
@@ -615,8 +686,8 @@ def Linear(in_features, out_features, bias=True, dropout=0):
     return m
 
 
-# @register_model_architecture('lstm', 'lstm')
-@register_model_architecture('lstm_traffic', 'lstm_traffic')
+# @register_model_architecture('NTF', 'NTF')
+@register_model_architecture('NTF_traffic', 'NTF_traffic')
 def base_architecture(args):
     args.dropout = getattr(args, 'dropout', 0.1)
     args.encoder_embed_dim = getattr(args, 'encoder_embed_dim', 512)

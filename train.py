@@ -158,7 +158,7 @@ def train(args, trainer, task, epoch_itr):
     stats = get_training_stats(trainer)
     for k, meter in extra_meters.items():
         stats[k] = meter.avg
-        wandb.log({k:meter.avg})
+        #wandb.log({k:meter.avg})
     progress.print(stats, tag='train', step=stats['num_updates'])
 
     # reset training meters
@@ -239,7 +239,7 @@ def validate(args, trainer, task, epoch_itr, subsets):
         stats = get_valid_stats(trainer, args, extra_meters)
         for k, meter in extra_meters.items():
             stats[k] = meter.avg
-            wandb.log({k:meter.avg})
+            #wandb.log({k:meter.avg})
         progress.print(stats, tag=subset, step=trainer.get_num_updates())
 
         valid_losses.append(

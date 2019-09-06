@@ -23,21 +23,31 @@ from itertools import cycle, islice
 
 class TrafficDataset(FairseqDataset):
     def __init__(self, csv_file, seq_len=360, train_size=48000,vol_multiple = 1.0,
-                scale_input = True, scale_output = False,
+                scale_input = True, scale_output = True,
                 shuffle=True, input_feeding=True,
-                max_sample_size=None, min_sample_size=None
+                max_sample_size=None, min_sample_size=None,split='train'
                 ):
         super().__init__()
         
-
+        train_size = 4800
         self.train_size = train_size
         self.all_data = pd.read_csv(csv_file,index_col=0)
         self.all_data.iloc[:,::5] = self.all_data.iloc[:,::5] * vol_multiple
+
+        self.max_vals = self.all_data.iloc[:self.train_size,:].max().values+1.0
+
+        if split=='train':
+            self.all_data = self.all_data.iloc[:self.train_size,:]
+        elif split=='valid':
+            print("valid SET")
+            self.all_data = self.all_data.iloc[self.train_size:,:]
+        else:
+            self.all_data = self.all_data.iloc[-360*4:,:]
         
         self.scale_input = scale_input
         self.scale_output = scale_output
     
-        self.max_vals = self.all_data.iloc[:self.train_size,:].max().values+1.0
+        
         self.seq_len = seq_len
 
         self.input_feeding = input_feeding
@@ -46,7 +56,10 @@ class TrafficDataset(FairseqDataset):
         self.min_sample_size = min_sample_size if min_sample_size is not None else self.max_sample_size
 
         self.shuffle = shuffle
-
+    
+    def get_max_vals(self):
+        return self.max_vals
+    
     def __getitem__(self, index):
 
         input_len = self.seq_len
@@ -76,7 +89,7 @@ class TrafficDataset(FairseqDataset):
         return F.interpolate(x.view(1, 1, -1), scale_factor=factor).squeeze()
 
     def __len__(self):
-        return len(self.all_data.iloc[:self.train_size,:]) // self.seq_len# - 2 * self.seq_len - 1
+        return len(self.all_data) -4* self.seq_len# - 2 * self.seq_len - 1
 
     def collater(self, samples):
         if len(samples) == 0:
@@ -87,10 +100,10 @@ class TrafficDataset(FairseqDataset):
 
         target = torch.FloatTensor([s['target'] for s in samples])
         ntokens = sum(len(s['target']) for s in samples)
-        max_list = list(islice(cycle(self.max_vals), 32400))
+        #max_list = list(islice(cycle(self.max_vals), 32400))
         # from fairseq import pdb; pdb.set_trace();
         
-        previous_output = [max_list*samples[-1]['source']] + [s['target'] for s in samples[:-1]]
+        previous_output = [samples[0]['target']] + [s['target'] for s in samples[:-1]] #BUG: not quite right
         prev_output_tokens = torch.FloatTensor(previous_output)
 
         # prev_output_tokens = None

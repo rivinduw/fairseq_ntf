@@ -38,18 +38,20 @@ class MSECriterion(FairseqCriterion):
 
     def compute_loss(self, model, net_output, sample, reduce=True):
         # import fairseq.pdb as pdb; pdb.set_trace()
-        lprobs = model.get_normalized_probs(net_output, log_probs=False)
+        lprobs = model.get_normalized_probs(net_output, log_probs=False).float()
         #from fairseq import pdb; pdb.set_trace();
-        lprobs = lprobs.float().view(-1)#, lprobs.size(-1))
-        target = model.get_targets(sample, net_output).float().view(-1)#,360,85).float()
+        #lprobs = lprobs.float().view(-1)#, lprobs.size(-1))
+        target = model.get_targets(sample, net_output).float()#.view(-1)#,360,85).float()
+        #target = target.transpose(0, 1)
+        #target = target#.view(-1)
         target_mask = target>1e-6
         # print("mask sum",target_mask.float().sum(),target.sum())
-        loss = F.l1_loss(# F.mse_loss(
+        loss = F.mse_loss(#F.l1_loss(# F.mse_loss(
             lprobs*target_mask.float(), 
             target*target_mask.float(),
             reduction='sum'
             )
-        loss = loss / target_mask.sum()
+        loss = loss#360*85* loss / target_mask.sum()
         # loss = F.nll_loss(
         #     lprobs,
         #     target,

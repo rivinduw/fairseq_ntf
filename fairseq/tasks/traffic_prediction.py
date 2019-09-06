@@ -7,6 +7,9 @@ from fairseq.data import TrafficDataset
 import pandas as pd
 import matplotlib.pyplot as plt
 
+
+import wandb
+
 # python train.py data --task traffic_prediction --arch lstm_traffic --criterion mse_loss --batch-size 16
 # C:\Users\rwe180\Documents\python-scripts\pytorch\pyNTF\
 
@@ -44,10 +47,14 @@ class TrafficPredictionTask(FairseqTask):
 
         self.seq_len = 360
         data_file = os.path.join(self.args.data, '{}.csv'.format('triange_demand_5_10_15_20_x90'))#split))
-        self.datasets[split] = TrafficDataset(data_file,seq_len=self.seq_len, train_size=48000,vol_multiple = 120.0)
-        
+        self.datasets[split] = TrafficDataset(data_file,seq_len=self.seq_len, train_size=48000,vol_multiple = 120.0,split=split)
+        #if split=='train':
+        self.max_vals = self.datasets[split].get_max_vals()
+
         print('| {} {} {} examples'.format(self.args.data, split, len(self.datasets[split])))
-        
+    
+    def get_max_vals(self):
+        return self.max_vals       
 
     def max_positions(self):
         """Return the max input length allowed by the task."""
@@ -70,6 +77,7 @@ class TrafficPredictionTask(FairseqTask):
         self.valid_step_num += 1
         with torch.no_grad():
             loss, sample_size, logging_output = criterion(model, sample)
+            wandb.log({'valid_loss':loss})
             if self.valid_step_num%10 == 0:
                 net_output = model(**sample['net_input'])
                 print("****")
@@ -79,13 +87,13 @@ class TrafficPredictionTask(FairseqTask):
                 # plt.pause(0.1)
                 print(net_output[0].size())
                 
-                preds = net_output[0].detach().cpu().numpy()#[0,:,0]#model.get_normalized_probs(net_output, log_probs=True).float()
+                preds = net_output[0].view(-1,360,90).detach().cpu().numpy()#[0,:,0]#model.get_normalized_probs(net_output, log_probs=True).float()
                 src = sample['net_input']['src_tokens'].view(-1,360,90).detach().cpu().numpy()#[0,:,0]# model.get_targets(sample, net_output).float()
                 target = sample['target'].view(-1,360,90).detach().cpu().numpy()
-                for i in range(2):
-                    for seg in range(10):
-                        ax = pd.DataFrame(preds[i,:,seg*5]).plot()
-                        pd.DataFrame(target[i,:,seg*5]).plot(ax=ax)
+                for i in range(1,4):
+                    for seg in range(5):
+                        ax = pd.DataFrame(preds[i,:,seg*1]).plot()
+                        pd.DataFrame(target[i,:,seg*1]).plot(ax=ax)
                         plt.title(str(i)+"***"+str(seg))
                         plt.pause(0.1)
                         plt.show(block=False)
@@ -95,6 +103,34 @@ class TrafficPredictionTask(FairseqTask):
                     plt.close('all')
                 plt.pause(5.0)
                 plt.close('all')
+        return loss, sample_size, logging_output
+
+    def train_step(self, sample, model, criterion, optimizer, ignore_grad=False):
+        """
+        Do forward and backward, and return the loss as computed by *criterion*
+        for the given *model* and *sample*.
+
+        Args:
+            sample (dict): the mini-batch. The format is defined by the
+                :class:`~fairseq.data.FairseqDataset`.
+            model (~fairseq.models.BaseFairseqModel): the model
+            criterion (~fairseq.criterions.FairseqCriterion): the criterion
+            optimizer (~fairseq.optim.FairseqOptimizer): the optimizer
+            ignore_grad (bool): multiply loss by 0 if this is set to True
+
+        Returns:
+            tuple:
+                - the loss
+                - the sample size, which is used as the denominator for the
+                  gradient
+                - logging outputs to display while training
+        """
+        model.train()
+        loss, sample_size, logging_output = criterion(model, sample)
+        if ignore_grad:
+            loss *= 0
+        optimizer.backward(loss)
+        wandb.log({'train_loss':loss})
         return loss, sample_size, logging_output
 
     # We could override this method if we wanted more control over how batches
