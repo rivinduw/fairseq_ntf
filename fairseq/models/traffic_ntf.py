@@ -212,13 +212,14 @@ class AttentionLayer(nn.Module):
     def forward(self, input, source_hids, encoder_padding_mask):
         # input: bsz x input_embed_dim
         # source_hids: srclen x bsz x output_embed_dim
-        # import fairseq.pdb as pdb; pdb.set_trace()
 
         # x: bsz x output_embed_dim
         x = self.input_proj(input)
-
+        
         # compute attention
-        attn_scores = (source_hids * x.unsqueeze(0)).sum(dim=2)
+        #[360, 16, 90] * 1, [16, 90]
+        attn_scores = (source_hids * x.unsqueeze(0))#.sum(dim=2)
+        #[srclen, bsz]
 
         # don't attend over padding
         if encoder_padding_mask is not None:
@@ -229,11 +230,15 @@ class AttentionLayer(nn.Module):
 
         attn_scores = F.softmax(attn_scores, dim=0)  # srclen x bsz
 
+        # from fairseq import pdb; pdb.set_trace();
         # sum weighted sources
-        x = (attn_scores.unsqueeze(2) * source_hids).sum(dim=0)
-
+        x = (attn_scores * source_hids).sum(dim=0)
+        #x = (attn_scores.unsqueeze(2) * source_hids).sum(dim=0)
+        
         x = torch.tanh(self.output_proj(torch.cat((x, input), dim=1)))
-        return x, attn_scores
+        # attn_scores [360, 16, 90]
+        attn_scores = attn_scores.sum(dim=2)
+        return x, attn_scores#.sum(dim=2)
 
 
 class TrafficNTFDecoder(FairseqIncrementalDecoder):
@@ -326,10 +331,10 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
             # prev_output_tokens = prev_output_tokens[:, -1:]
             prev_output_tokens = prev_output_tokens[:, -1:,:]
             
-        bsz, one_input_size = prev_output_tokens.size()
+        # bsz, one_input_size = prev_output_tokens.size()
         # self.seq_len = 360
-        seqlen = self.seq_len
-        # bsz, seqlen, segment_units = prev_output_tokens.size()
+        # seqlen = self.seq_len
+        bsz, seqlen, segment_units = prev_output_tokens.size()
 
         # get outputs from encoder
         encoder_outs, encoder_hiddens, encoder_cells = encoder_out[:3]
@@ -358,7 +363,7 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
                 prev_cells = [self.encoder_cell_proj(x) for x in prev_cells]
             input_feed = x.new_zeros(bsz, self.hidden_size)
 
-        attn_scores = x.new_zeros(srclen, seqlen, bsz)
+        attn_scores = x.new_zeros(srclen, seqlen, bsz)#x.new_zeros(segment_units, seqlen, bsz)  #x.new_zeros(srclen, seqlen, bsz)
         outs = []
         
         for j in range(seqlen):
@@ -427,11 +432,12 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
 
         # collect outputs across time steps
         #print(torch.stack(outs, dim=0).size())
-        # from fairseq import pdb; pdb.set_trace()
-        x = torch.stack(outs, dim=0)#.view(seqlen, bsz, self.hidden_size)
+        # from fairseq import pdb; pdb.set_trace();
+        x = torch.stack(outs, dim=1)#.view(seqlen, bsz, self.hidden_size)
 
         # T x B x C -> B x T x C
-        x = x.transpose(1, 0)
+        #x = x.transpose(1, 0)
+
 
         # srclen x tgtlen x bsz -> bsz x tgtlen x srclen
         if not self.training and self.need_attn:
@@ -450,12 +456,20 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
             #     x = self.fc_out(x)
         #import fairseq.pdb as pdb; pdb.set_trace()#[:,-1,:]
         
-        x = x.contiguous().view(bsz,-1)#self.output_size)#self.fc_out(x)
+        #x = x.contiguous().view(bsz,-1)#self.output_size)#self.fc_out(x)
         return x, attn_scores
     
     #my implementation
     def get_normalized_probs(self, net_output, log_probs=None, sample=None):
         return net_output[0]
+    
+    def get_targets(self, sample, net_output):
+        """Get targets from either the sample or the net's output."""
+        target =  sample['target']
+        print(target.size())
+        target = target.transpose(1, 2)
+        return target
+        
 
     def reorder_incremental_state(self, incremental_state, new_order):
         super().reorder_incremental_state(incremental_state, new_order)

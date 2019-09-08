@@ -42,6 +42,7 @@ class MSECriterion(FairseqCriterion):
         #from fairseq import pdb; pdb.set_trace();
         #lprobs = lprobs.float().view(-1)#, lprobs.size(-1))
         target = model.get_targets(sample, net_output).float()#.view(-1)#,360,85).float()
+        #from fairseq import pdb; pdb.set_trace();
         #target = target.transpose(0, 1)
         #target = target#.view(-1)
         target_mask = target>1e-6
@@ -51,7 +52,7 @@ class MSECriterion(FairseqCriterion):
             target*target_mask.float(),
             reduction='sum'
             )
-        loss = loss#360*85* loss / target_mask.sum()
+        loss = loss / target_mask.sum()
         # loss = F.nll_loss(
         #     lprobs,
         #     target,

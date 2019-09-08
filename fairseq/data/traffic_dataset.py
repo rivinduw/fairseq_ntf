@@ -75,7 +75,7 @@ class TrafficDataset(FairseqDataset):
         one_label = self.all_data.iloc[index+self.seq_len:index+self.seq_len+label_len, :].values
         if self.scale_output:
           one_label = one_label/self.max_vals
-        one_label = np.reshape(one_label,-1)
+        #one_label = np.reshape(one_label,-1)
 
         # print(one_label.size())
         # from fairseq import pdb; pdb.set_trace()
