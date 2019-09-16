@@ -29,11 +29,12 @@ class TrafficDataset(FairseqDataset):
                 ):
         super().__init__()
         
-        train_size = 360*16
+        #train_size = 360*16
         valid_size = train_size
         self.train_size = train_size
         
         self.all_data = pd.read_csv(csv_file,index_col=0)
+        print("##Length of Dataset: ",len(self.all_data))
         self.all_data.iloc[:,::5] = self.all_data.iloc[:,::5] * vol_multiple
 
         self.all_data_pad = pd.read_csv(csv_file.replace('.csv','.csv'),index_col=0)
@@ -43,16 +44,22 @@ class TrafficDataset(FairseqDataset):
         # self.train_size = len(self.all_data)//3
 
         self.max_vals = self.all_data.iloc[:self.train_size,:].max().values+1.0
+        self.max_vals[0::5] = 10000.0
+        self.max_vals[1::5] = 100.0
         self.max_vals[2::5] = 100.0
+        self.max_vals[3::5] = 100.0
+        self.max_vals[4::5] = 100.0
         print(self.max_vals)
 
         if split=='train':
-            self.all_data = self.all_data.iloc[:self.train_size*self.seq_len,:]
-            self.all_data_pad = self.all_data_pad .iloc[:self.train_size*self.seq_len,:]
+            self.all_data = self.all_data.iloc[:self.train_size,:]
+            self.all_data_pad = self.all_data_pad .iloc[:self.train_size,:]
+            print("###Length of Dataset: ",len(self.all_data))
         elif split=='valid':
             print("valid SET")
-            self.all_data = self.all_data.iloc[self.train_size:self.train_size*self.seq_len+valid_size*self.seq_len,:]
-            self.all_data_pad = self.all_data_pad.iloc[self.train_size:self.train_size*self.seq_len+valid_size*self.seq_len,:]
+            self.all_data = self.all_data.iloc[self.train_size:self.train_size+valid_size,:]
+            self.all_data_pad = self.all_data_pad.iloc[self.train_size:self.train_size+valid_size,:]
+            print("###Length of Dataset: ",len(self.all_data))
         else:
             self.all_data = self.all_data.iloc[self.train_size+valid_size:,:]
             self.all_data_pad = self.all_data_pad.iloc[self.train_size+valid_size:,:]
@@ -99,7 +106,7 @@ class TrafficDataset(FairseqDataset):
         return F.interpolate(x.view(1, 1, -1), scale_factor=factor).squeeze()
 
     def __len__(self):
-        return len(self.all_data) // self.seq_len #- self.seq_len# - 1 #- 4* self.seq_len# - 2 * self.seq_len - 1
+        return len(self.all_data) - 4 * self.seq_len #- self.seq_len# - 1 #- 4* self.seq_len# - 2 * self.seq_len - 1
 
     def collater(self, samples):
         if len(samples) == 0:

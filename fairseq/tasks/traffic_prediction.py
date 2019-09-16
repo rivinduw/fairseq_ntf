@@ -46,7 +46,7 @@ class TrafficPredictionTask(FairseqTask):
         """Load a given dataset split (e.g., train, valid, test)."""
 
         self.seq_len = 360
-        data_file = os.path.join(self.args.data, '{}.csv'.format('jan_mar_raw'))#split))
+        data_file = os.path.join(self.args.data, '{}.csv'.format('jan_mar'))#split))
         self.datasets[split] = TrafficDataset(data_file,seq_len=self.seq_len, train_size=48000,split=split)
         #if split=='train':
         self.max_vals = self.datasets[split].get_max_vals()
@@ -79,7 +79,7 @@ class TrafficPredictionTask(FairseqTask):
             loss, sample_size, logging_output = criterion(model, sample)
             try:
                 wandb.log({'valid_loss':loss})
-                if self.valid_step_num%10 == 0:
+                if self.valid_step_num%100 == 0:
                     net_output = model(**sample['net_input'])
                     print("****")
                     # plt.ion()
