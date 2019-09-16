@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import wandb
 
 # python train.py data --task traffic_prediction --arch lstm_traffic --criterion mse_loss --batch-size 16
-# C:\Users\rwe180\Documents\python-scripts\pytorch\pyNTF\
+# C:\Users\rwe180\Documents\python-scripts\pytorch\pyNTF\ 
 
 @register_task('traffic_prediction')
 class TrafficPredictionTask(FairseqTask):
@@ -46,8 +46,8 @@ class TrafficPredictionTask(FairseqTask):
         """Load a given dataset split (e.g., train, valid, test)."""
 
         self.seq_len = 360
-        data_file = os.path.join(self.args.data, '{}.csv'.format('triange_demand_5_10_15_20_x90'))#split))
-        self.datasets[split] = TrafficDataset(data_file,seq_len=self.seq_len, train_size=48000,vol_multiple = 120.0,split=split)
+        data_file = os.path.join(self.args.data, '{}.csv'.format('jan_mar_raw'))#split))
+        self.datasets[split] = TrafficDataset(data_file,seq_len=self.seq_len, train_size=48000,split=split)
         #if split=='train':
         self.max_vals = self.datasets[split].get_max_vals()
 
@@ -77,32 +77,39 @@ class TrafficPredictionTask(FairseqTask):
         self.valid_step_num += 1
         with torch.no_grad():
             loss, sample_size, logging_output = criterion(model, sample)
-            wandb.log({'valid_loss':loss})
-            if self.valid_step_num%10 == 0:
-                net_output = model(**sample['net_input'])
-                print("****")
-                # plt.ion()
-                # plt.pause(0.1)
-                # plt.close('all')
-                # plt.pause(0.1)
-                print(net_output[0].size())
-                
-                preds = net_output[0].view(-1,360,90).detach().cpu().numpy()#[0,:,0]#model.get_normalized_probs(net_output, log_probs=True).float()
-                src = sample['net_input']['src_tokens'].view(-1,360,90).detach().cpu().numpy()#[0,:,0]# model.get_targets(sample, net_output).float()
-                target = sample['target'].view(-1,360,90).detach().cpu().numpy()
-                for i in range(1,4):
-                    for seg in range(5):
-                        ax = pd.DataFrame(preds[i,:,seg*1]).plot()
-                        pd.DataFrame(target[i,:,seg*1]).plot(ax=ax)
-                        plt.title(str(i)+"***"+str(seg))
-                        plt.pause(0.1)
-                        plt.show(block=False)
-                        plt.pause(3.0)
-                        plt.pause(0.1)
-                    plt.pause(2.0)
+            try:
+                wandb.log({'valid_loss':loss})
+                if self.valid_step_num%10 == 0:
+                    net_output = model(**sample['net_input'])
+                    print("****")
+                    # plt.ion()
+                    # plt.pause(0.1)
+                    # plt.close('all')
+                    # plt.pause(0.1)
+                    print(net_output[0].size())
+                    
+                    preds = net_output[0].view(-1,360,90).detach().cpu().numpy()#[0,:,0]#model.get_normalized_probs(net_output, log_probs=True).float()
+                    src = sample['net_input']['src_tokens'].view(-1,360,90).detach().cpu().numpy()#[0,:,0]# model.get_targets(sample, net_output).float()
+                    target = sample['target'].view(-1,360,90).detach().cpu().numpy()
+                    for i in range(2):
+                        for seg in range(0,10):
+                            ax = pd.DataFrame(preds[i,:,seg*1]).plot()
+                            pd.DataFrame(target[i,:,seg*1]).plot(ax=ax)
+                            plt.title(str(i)+"***"+str(seg))
+                            plt.pause(0.1)
+                            plt.show(block=False)
+                            plt.pause(3.0)
+                            plt.pause(0.1)
+                            try:
+                                wandb.log({"chart"+str(i)+"_"+str(seg): plt})
+                            except:
+                                pass
+                        plt.pause(2.0)
+                        plt.close('all')
+                    plt.pause(5.0)
                     plt.close('all')
-                plt.pause(5.0)
-                plt.close('all')
+            except:
+                pass
         return loss, sample_size, logging_output
 
     def train_step(self, sample, model, criterion, optimizer, ignore_grad=False):

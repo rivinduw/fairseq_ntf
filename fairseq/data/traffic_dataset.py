@@ -29,26 +29,36 @@ class TrafficDataset(FairseqDataset):
                 ):
         super().__init__()
         
-        train_size = 4800
+        train_size = 360*16
+        valid_size = train_size
         self.train_size = train_size
+        
         self.all_data = pd.read_csv(csv_file,index_col=0)
         self.all_data.iloc[:,::5] = self.all_data.iloc[:,::5] * vol_multiple
 
+        self.all_data_pad = pd.read_csv(csv_file.replace('.csv','.csv'),index_col=0)
+        self.all_data_pad.iloc[:,::5] = self.all_data_pad.iloc[:,::5] * vol_multiple
+
+        self.seq_len = seq_len
+        # self.train_size = len(self.all_data)//3
+
         self.max_vals = self.all_data.iloc[:self.train_size,:].max().values+1.0
+        self.max_vals[2::5] = 100.0
+        print(self.max_vals)
 
         if split=='train':
-            self.all_data = self.all_data.iloc[:self.train_size,:]
+            self.all_data = self.all_data.iloc[:self.train_size*self.seq_len,:]
+            self.all_data_pad = self.all_data_pad .iloc[:self.train_size*self.seq_len,:]
         elif split=='valid':
             print("valid SET")
-            self.all_data = self.all_data.iloc[self.train_size:,:]
+            self.all_data = self.all_data.iloc[self.train_size:self.train_size*self.seq_len+valid_size*self.seq_len,:]
+            self.all_data_pad = self.all_data_pad.iloc[self.train_size:self.train_size*self.seq_len+valid_size*self.seq_len,:]
         else:
-            self.all_data = self.all_data.iloc[-360*4:,:]
+            self.all_data = self.all_data.iloc[self.train_size+valid_size:,:]
+            self.all_data_pad = self.all_data_pad.iloc[self.train_size+valid_size:,:]
         
         self.scale_input = scale_input
         self.scale_output = scale_output
-    
-        
-        self.seq_len = seq_len
 
         self.input_feeding = input_feeding
 
@@ -67,7 +77,7 @@ class TrafficDataset(FairseqDataset):
 
         NEG = -1e-3
 
-        one_input = self.all_data.iloc[index:index+self.seq_len, :].values
+        one_input = self.all_data_pad.iloc[index:index+self.seq_len, :].values
         if self.scale_input:
           one_input = one_input/self.max_vals
         one_input = np.reshape(one_input,-1)
@@ -89,7 +99,7 @@ class TrafficDataset(FairseqDataset):
         return F.interpolate(x.view(1, 1, -1), scale_factor=factor).squeeze()
 
     def __len__(self):
-        return len(self.all_data) -4* self.seq_len# - 2 * self.seq_len - 1
+        return len(self.all_data) // self.seq_len #- self.seq_len# - 1 #- 4* self.seq_len# - 2 * self.seq_len - 1
 
     def collater(self, samples):
         if len(samples) == 0:
@@ -101,9 +111,11 @@ class TrafficDataset(FairseqDataset):
         target = torch.FloatTensor([s['target'] for s in samples])
         ntokens = sum(len(s['target']) for s in samples)
         #max_list = list(islice(cycle(self.max_vals), 32400))
-        # from fairseq import pdb; pdb.set_trace();
-        
-        previous_output = [samples[0]['target']] + [s['target'] for s in samples[:-1]] #BUG: not quite right
+        #from fairseq import pdb; pdb.set_trace();
+        previous_output = [s['target'][:-1] for s in samples] # [samples[0]['target'][0]]
+        previous_output[0] = np.insert(previous_output[0],0,samples[0]['source'][-1],axis=0)
+        #from fairseq import pdb; pdb.set_trace();
+        # previous_output = [samples[0]['target']] + [s['target'] for s in samples[:-1]] #BUG: not quite right
         prev_output_tokens = torch.FloatTensor(previous_output)
 
         # prev_output_tokens = None
@@ -146,6 +158,7 @@ class TrafficDataset(FairseqDataset):
         # }
         if prev_output_tokens is not None:
             batch['net_input']['prev_output_tokens'] = prev_output_tokens
+        # from fairseq import pdb; pdb.set_trace()
         return batch
 
     def num_tokens(self, index):

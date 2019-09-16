@@ -117,7 +117,7 @@ class TrafficNTFEncoder(FairseqEncoder):
         
         one_timestep_size = self.num_segments*self.num_var_per_segment
 
-        assert one_sample_length == self.seq_len*one_timestep_size
+        #assert one_sample_length == self.seq_len*one_timestep_size
 
         x = input_x.view(-1,self.seq_len,one_timestep_size).float()
         #print("x_mean volume",x[:,:,::5].mean())
@@ -134,7 +134,7 @@ class TrafficNTFEncoder(FairseqEncoder):
 
         # print("x3",x.size())
 
-        x_mask = x > 1e-6 #BUG
+        x_mask = x < 1e-6 #BUG
         # print("x_mask",x_mask.size())
 
         # apply LSTM
@@ -170,7 +170,7 @@ class TrafficNTFEncoder(FairseqEncoder):
             final_hiddens = combine_bidir(final_hiddens)
             final_cells = combine_bidir(final_cells)
 
-        encoder_padding_mask = x_mask.sum(dim=2)<1 #BUG: need multidim mask
+        encoder_padding_mask = x_mask#.sum(dim=2)<1 #BUG: need multidim mask
 
         # print("x",x.size())
         # print("final_hiddens",final_hiddens.size())
@@ -217,20 +217,25 @@ class AttentionLayer(nn.Module):
         x = self.input_proj(input)
         
         # compute attention
+        #from fairseq import pdb; pdb.set_trace();
         #[360, 16, 90] * 1, [16, 90]
         attn_scores = (source_hids * x.unsqueeze(0))#.sum(dim=2)
         #[srclen, bsz]
+
+        # attn_scores[attn_scores!=attn_scores] = float('-inf')
 
         # don't attend over padding
         if encoder_padding_mask is not None:
             attn_scores = attn_scores.float().masked_fill_(
                 encoder_padding_mask,
-                float('-inf')
+                float(-1e6)#float('-inf')
             ).type_as(attn_scores)  # FP16 support: cast to float and back
 
-        attn_scores = F.softmax(attn_scores, dim=0)  # srclen x bsz
+        #attn_scores = attn_scores.float().masked_fill_(encoder_padding_mask,float('-inf'))
+        #attn_scores = F.softmax(attn_scores, dim=0)  # srclen x bsz
+        attn_scores = nn.Softmax(2)(attn_scores)
 
-        # from fairseq import pdb; pdb.set_trace();
+        #from fairseq import pdb; pdb.set_trace();
         # sum weighted sources
         x = (attn_scores * source_hids).sum(dim=0)
         #x = (attn_scores.unsqueeze(2) * source_hids).sum(dim=0)
@@ -305,7 +310,8 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
         
         
 
-        self.segment_fixed = torch.Tensor([[582.0/1000.,3.],[318.0/1000.,4.],[703.0/1000.,4.],[ 387.0/1000.,4.],[ 300.0/1000.,5.],[ 348.0/1000.,5.],[ 375.0/1000.,4.],[ 300.0/1000.,4.],[ 257.0/1000.,4.],[ 500.0/1000.,4.],[ 484.0/1000.,4.],[ 400.0/1000.,3.],[ 420.0/1000.,3.],[ 589.0/1000.,3.],[ 427./1000.,3.],[ 400.0/1000.,2.],[ 515.0/1000.,2.0],[ 495.0/1000.,3.0]]).to(self.device)#torch.Tensor(self.num_segments, 2)
+        #self.segment_fixed = torch.Tensor([[582.0/1000.,3.],[318.0/1000.,4.],[703.0/1000.,4.],[ 387.0/1000.,4.],[ 300.0/1000.,5.],[ 348.0/1000.,5.],[ 375.0/1000.,4.],[ 300.0/1000.,4.],[ 257.0/1000.,4.],[ 500.0/1000.,4.],[ 484.0/1000.,4.],[ 400.0/1000.,3.],[ 420.0/1000.,3.],[ 589.0/1000.,3.],[ 427./1000.,3.],[ 400.0/1000.,2.],[ 515.0/1000.,2.0],[ 495.0/1000.,3.0]]).to(self.device)#torch.Tensor(self.num_segments, 2)
+        self.segment_fixed = torch.Tensor([[0.57237,3.],[0.92267,3.],[0.4238,3.],[0.8092,3.],[1.183,3.],[1.5899,3.],[0.2161,3.],[0.88367,3.],[0.59879,3.],[0.91263,3.],[0.672,3.],[1.7492,3.],[0.28183,3.],[0.85799,3.],[1.0847,3.],[1.1839,3.],[0.56727,3.],[0.5147,3.]]).to(self.device)
         self.model_fixed = torch.Tensor([[10./3600.,17./3600.,23.,1.7,13.]]).to(self.device)
 
         num_boundry = 3
@@ -367,12 +373,30 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
         outs = []
         
         for j in range(seqlen):
-            #from fairseq import pdb; pdb.set_trace()
+            from fairseq import pdb; pdb.set_trace()
             # input feeding: concatenate context vector from previous time step
-            if random.random()>0.0:
-                input = x[j, :, :]#torch.cat((x[j, :, :], input_feed), dim=1)
-            else:
-                input = input_feed
+            input_mask = x[j, :, :] > 1e-6
+            input = (x[j, :, :]*input_mask.float()) + ( (1-input_mask.float())*input_feed)
+            input = torch.clamp(input, min=0.0, max=1.0)
+            #import pdb; pdb.set_trace()
+
+            if random.random() > 0.995:
+                means = (input*(self.max_vals+1e-6)).view(18,5).mean(dim=0).cpu().detach().numpy()
+                print("\n\ninput means\t",means)
+                wandb.log({"input0": wandb.Histogram(means[0])})
+                wandb.log({"input1": wandb.Histogram(means[1])})
+                wandb.log({"input2": wandb.Histogram(means[2])})
+                wandb.log({"input3": wandb.Histogram(means[3])})
+                wandb.log({"input4": wandb.Histogram(means[4])})
+                mean_x = x[j, :, :].view(18,5).mean(dim=0)
+                print("x[j, :, :] means\t",mean_x.cpu().detach().numpy())
+                mean_feed = input_feed.view(18,5).mean(dim=0)
+                print("input_feed means\t",mean_feed.cpu().detach().numpy())
+            
+            # if random.random()>0.0:
+            #     input = x[j, :, :]#torch.cat((x[j, :, :], input_feed), dim=1)
+            # else:
+            #     input = input_feed
 
             for i, rnn in enumerate(self.layers):
                 # recurrent cell
@@ -390,7 +414,7 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
                 out, attn_scores[:, j, :] = self.attention(hidden, encoder_outs, encoder_padding_mask)
             else:
                 out = hidden
-            #from fairseq import pdb; pdb.set_trace()
+            # from fairseq import pdb; pdb.set_trace()
             ntf_input = self.ntf_projection(out)
             boundry_params, segment_params = torch.split(ntf_input, [3,8*self.num_segments],dim=1)
             boundry_params = torch.Tensor([200.0,10000.0,200.0]).to(self.device)*torch.sigmoid(boundry_params)
@@ -401,24 +425,24 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
             segment_params = segment_params.permute(0, 2, 1)
             unscaled_input = input * self.max_vals
 
-            #print("boundry_params",boundry_params[0,::5].mean().item(),boundry_params.size())
-            #print("segment_params",segment_params[0,::5,0].mean().item(),segment_params.size())
+            # print("boundry_params",boundry_params[0,::5].mean().item(),boundry_params.size())
+            # print("segment_params",segment_params[0,::5,0].mean().item(),segment_params.size())
 
             out = self.ntf_module(unscaled_input,segment_params,boundry_params)
 
-            #print(out.mean().item())
+            # print(out.mean().item())
 
-            out = out / self.max_vals
+            out = out / (self.max_vals+1e-6)
 
             
 
-            #from fairseq import pdb; pdb.set_trace()
+            # from fairseq import pdb; pdb.set_trace()
 
-            #out = F.dropout(out, p=self.dropout_out, training=self.training)
+            # out = F.dropout(out, p=self.dropout_out, training=self.training)
 
 
             # input feeding
-            input_feed = out
+            input_feed = out#.view(-1,360,90)
 
 
             # save final output
@@ -454,7 +478,7 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
                 x = F.linear(x, self.embed_tokens.weight)
             # else:
             #     x = self.fc_out(x)
-        #import fairseq.pdb as pdb; pdb.set_trace()#[:,-1,:]
+        # import fairseq.pdb as pdb; pdb.set_trace()#[:,-1,:]
         
         #x = x.contiguous().view(bsz,-1)#self.output_size)#self.fc_out(x)
         return x, attn_scores
@@ -538,19 +562,20 @@ class NTF_Module(nn.Module):
         
         self.Delta_index = 0
         self.lambda_index = 1
+
+        self.calculate_velocity = False
         
     
     def future_v(self,x,boundry_params,segment_params):
       TINY = 1e-6
       
       v0, q0, rhoNp1 = torch.unbind(boundry_params, dim=2)
-      vf, a, rhocr, g, omegar, omegas, epsq, epsv = torch.unbind(segment_params, dim=2)
-      
+      vf, a_var, rhocr, g, omegar, omegas, epsq, epsv = torch.unbind(segment_params, dim=2)
       #rhocr = torch.clamp(rhocr, min=30, max=500)
       try:
         if random.random() > 0.99:
             wandb.log({"vf": wandb.Histogram(vf.cpu().detach().numpy())})
-            wandb.log({"a": wandb.Histogram(a.cpu().detach().numpy())})
+            wandb.log({"a_var": wandb.Histogram(a_var.cpu().detach().numpy())})
             wandb.log({"rhocr": wandb.Histogram(rhocr.cpu().detach().numpy())})
             wandb.log({"g": wandb.Histogram(g.cpu().detach().numpy())})
             wandb.log({"omegar": wandb.Histogram(q0.cpu().detach().numpy())})
@@ -563,20 +588,32 @@ class NTF_Module(nn.Module):
         # tb.add_histogram('omegas', omegas, epoch)
       except Exception as e:
         print(e)
-      
-      current_velocities = x[:,:,self.v_index]
+
       current_densities = x[:,:,self.rho_index]
+      current_flows = x[:,:,self.q_index]
+      if self.calculate_velocity:
+        current_velocities = current_flows / (current_densities*self.segment_fixed[:,self.lambda_index]+TINY)
+        if random.random() > 0.99:
+            wandb.log({"current_velocities": wandb.Histogram(current_velocities.cpu().detach().numpy())})
+            wandb.log({"current_densities": wandb.Histogram(current_densities.cpu().detach().numpy())})
+            wandb.log({"current_flows": wandb.Histogram(current_flows.cpu().detach().numpy())})
+        current_velocities = torch.clamp(current_velocities, min=5, max=200)
+      else:
+        current_velocities = x[:,:,self.v_index]
+        current_velocities = torch.clamp(current_velocities, min=5, max=200)
+
+
       prev_velocities = torch.cat([v0,current_velocities[:,:-1]],dim=1)
       next_densities = torch.cat([current_densities[:,1:],rhoNp1],dim=1)
 
-      stat_speed = vf* torch.exp(torch.div(-1,a+TINY)*torch.pow(torch.div(current_densities,rhocr+TINY)+TINY,a))
-      if random.random() > 0.9999:
+      stat_speed = vf* torch.exp(torch.div(-1,a_var+TINY)*torch.pow(torch.div(current_densities,rhocr+TINY)+TINY,a_var))
+      if random.random() > 0.995:
         print("stat speed",stat_speed.size(),stat_speed.min().item(),stat_speed.mean().item(),stat_speed.max().item())
-      if random.random() > 0.99:
         print("v0,q0,rhoNN",v0[0].item(), q0[0].item(), rhoNp1[0].item(),v0.mean().item(), q0.mean().item(), rhoNp1.mean().item())
         print("q1",x[0,0,self.q_index].item(),x[:,0,self.q_index].mean().item())
-      if random.random() > 0.995:
-        print("vf, a, rhocr,g, omegar, omegas, epsq, epsv",vf[0].mean().item(), a[0].mean().item(), rhocr[0].mean().item(),g[0].mean().item(), omegar[0].mean().item(), omegas[0].mean().item(), epsq[0].mean().item(), epsv[0].mean().item())
+        print("vf, a, rhocr,g, omegar, omegas, epsq, epsv",vf[0].mean().item(), a_var[0].mean().item(), rhocr[0].mean().item(),g[0].mean().item(), omegar[0].mean().item(), omegas[0].mean().item(), epsq[0].mean().item(), epsv[0].mean().item())
+      
+      import pdb; pdb.set_trace()
 
       return current_velocities + (torch.div(self.T,self.tau+TINY)) * (stat_speed - current_velocities )  \
               + (torch.div(self.T,self.Delta) * current_velocities * (prev_velocities - current_velocities)) \
@@ -587,7 +624,7 @@ class NTF_Module(nn.Module):
     def future_rho(self,x,boundry_params):
       v0, q0, rhoNp1 = torch.unbind(boundry_params, dim=2)
       try:
-        if random.random() > 0.99:
+        if random.random() > 0.999:
             wandb.log({"v0": wandb.Histogram(v0.cpu().detach().numpy())})
             wandb.log({"q0": wandb.Histogram(q0.cpu().detach().numpy())})
             wandb.log({"rhoNp1": wandb.Histogram(rhoNp1.cpu().detach().numpy())})
@@ -600,9 +637,11 @@ class NTF_Module(nn.Module):
       current_flows = x[:,:,self.q_index]
       current_densities = x[:,:,self.rho_index]
       prev_flows = torch.cat([q0,current_flows[:,:-1]],dim=1)
+      #import pdb; pdb.set_trace()
       return current_densities + torch.mul(torch.div(self.T,torch.mul(self.Delta,self.lambda_var)),(prev_flows - current_flows + x[:,:,self.r_index] - x[:,:,self.s_index]))
     
     def forward(self,x,segment_params,boundry_params):
+      import pdb; pdb.set_trace()
       
       segment_params = segment_params.view((-1,self.num_segments, 8)) #TODO: remove hardcode
       boundry_params = boundry_params.view((-1,1, 3))  #TODO: remove hardcode
@@ -612,7 +651,7 @@ class NTF_Module(nn.Module):
       invalid_inputs_mask = (x<0).float()
       invalid_input_defaults = torch.zeros_like(x).to(self.device)
       invalid_input_defaults[:,:,self.v_index] = 100.0
-      invalid_input_defaults[:,:,self.q_index] = 2000.0
+      invalid_input_defaults[:,:,self.q_index] = 10000.0
       invalid_input_defaults[:,:,self.rho_index] = 20.0
 
       #print("xmean1",x.mean())
@@ -620,17 +659,18 @@ class NTF_Module(nn.Module):
       x = x + invalid_inputs_mask*invalid_input_defaults
 
       #print("xmean2",x.mean())
-      #import pdb; pdb.set_trace()
+      # 
 
       
-      #input_mask = torch.ones_like(x).to(self.device)#, dtype=torch.uint8).to(self.device)
-      #input_mask[:,:,self.rho_index] = segment_params[:,:,self.g_index]
+      input_mask = torch.ones_like(x).to(self.device)#, dtype=torch.uint8).to(self.device)
+      input_mask[:,:,self.rho_index] = segment_params[:,:,self.g_index]
       
-      #x = x*input_mask
+      x = x*input_mask
+      x = nn.functional.relu(x)
 
       future_velocities = self.future_v(x,boundry_params,segment_params)
       future_densities = self.future_rho(x,boundry_params)
-      future_occupancies = torch.div(future_densities,segment_params[:,:,self.g_index]+1e-6)
+      future_occupancies = future_densities / (segment_params[:,:,self.g_index]+1e-6)
 
       future_flows = future_densities * future_velocities * self.segment_fixed[:,self.lambda_index] + segment_params[:,:,self.epsq_index]
 
@@ -638,7 +678,7 @@ class NTF_Module(nn.Module):
       future_s = segment_params[:,:,self.omegas_index] + x[:,:,self.s_index]
       
       try:
-        if random.random() > 0.95:
+        if random.random() > 0.995:
             wandb.log({"future_velocities": wandb.Histogram(future_velocities.cpu().detach().numpy())})
             wandb.log({"future_densities": wandb.Histogram(future_densities.cpu().detach().numpy())})
             wandb.log({"future_occupancies": wandb.Histogram(future_occupancies.cpu().detach().numpy())})
@@ -654,11 +694,11 @@ class NTF_Module(nn.Module):
 
       
       future_velocities = torch.clamp(future_velocities, min=5, max=200)
-      future_velocities = torch.clamp(future_densities, min=1, max=100)
-      future_occupancies = torch.clamp(future_occupancies, min=1, max=20)
+      future_densities = torch.clamp(future_densities, min=1, max=100)
+      future_occupancies = torch.clamp(future_occupancies, min=1, max=30)
       future_flows = torch.clamp(future_flows, min=1, max=10000)
-      future_r = torch.clamp(future_r, min=0, max=100)
-      future_s = torch.clamp(future_s, min=0, max=100)
+      future_r = torch.clamp(future_r, min=0, max=1000)
+      future_s = torch.clamp(future_s, min=0, max=1000)
       
       one_stack =  torch.stack((future_flows,future_occupancies,future_velocities,future_r,future_s),dim=2)
 
