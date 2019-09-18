@@ -37,7 +37,7 @@ class TrafficDataset(FairseqDataset):
         print("##Length of Dataset: ",len(self.all_data))
         self.all_data.iloc[:,::5] = self.all_data.iloc[:,::5] * vol_multiple
 
-        self.all_data_pad = pd.read_csv(csv_file.replace('.csv','.csv'),index_col=0)
+        self.all_data_pad = pd.read_csv(csv_file.replace('.csv','_pad.csv'),index_col=0)
         self.all_data_pad.iloc[:,::5] = self.all_data_pad.iloc[:,::5] * vol_multiple
 
         self.seq_len = seq_len
@@ -63,7 +63,7 @@ class TrafficDataset(FairseqDataset):
         else:
             self.all_data = self.all_data.iloc[self.train_size+valid_size:,:]
             self.all_data_pad = self.all_data_pad.iloc[self.train_size+valid_size:,:]
-        
+
         self.scale_input = scale_input
         self.scale_output = scale_output
 
@@ -79,17 +79,22 @@ class TrafficDataset(FairseqDataset):
     
     def __getitem__(self, index):
 
+        #from fairseq import pdb; pdb.set_trace()
+
+        rand = 0#torch.randint(0, self.seq_len, (1,))[0].item()
+        idx = (index+rand) * self.seq_len
+
         input_len = self.seq_len
         label_len = self.seq_len
 
         NEG = -1e-3
 
-        one_input = self.all_data_pad.iloc[index:index+self.seq_len, :].values
+        one_input = self.all_data_pad.iloc[idx:idx+self.seq_len, :].values
         if self.scale_input:
           one_input = one_input/self.max_vals
-        one_input = np.reshape(one_input,-1)
+        #one_input = np.reshape(one_input,-1)
         
-        one_label = self.all_data.iloc[index+self.seq_len:index+self.seq_len+label_len, :].values
+        one_label = self.all_data.iloc[idx+self.seq_len:idx+self.seq_len+label_len, :].values
         if self.scale_output:
           one_label = one_label/self.max_vals
         #one_label = np.reshape(one_label,-1)
@@ -106,12 +111,13 @@ class TrafficDataset(FairseqDataset):
         return F.interpolate(x.view(1, 1, -1), scale_factor=factor).squeeze()
 
     def __len__(self):
-        return len(self.all_data) - 4 * self.seq_len #- self.seq_len# - 1 #- 4* self.seq_len# - 2 * self.seq_len - 1
+        return len(self.all_data) // self.seq_len - 1#self.seq_len#- self.seq_len# - 1 #- 4* self.seq_len# - 2 * self.seq_len - 1
 
     def collater(self, samples):
         if len(samples) == 0:
             return {}
         id = torch.LongTensor([s['id'] for s in samples])
+        #from fairseq import pdb; pdb.set_trace()
         src_tokens = torch.FloatTensor([s['source'] for s in samples])
         src_lengths = torch.LongTensor([len(s['source']) for s in samples])
 
@@ -120,7 +126,8 @@ class TrafficDataset(FairseqDataset):
         #max_list = list(islice(cycle(self.max_vals), 32400))
         #from fairseq import pdb; pdb.set_trace();
         previous_output = [s['target'][:-1] for s in samples] # [samples[0]['target'][0]]
-        previous_output[0] = np.insert(previous_output[0],0,samples[0]['source'][-1],axis=0)
+        # from fairseq import pdb; pdb.set_trace();
+        previous_output = [np.insert(previous_output[x],0,samples[x]['source'][-1],axis=0) for x in range(len(samples))]
         #from fairseq import pdb; pdb.set_trace();
         # previous_output = [samples[0]['target']] + [s['target'] for s in samples[:-1]] #BUG: not quite right
         prev_output_tokens = torch.FloatTensor(previous_output)

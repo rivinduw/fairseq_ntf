@@ -113,7 +113,8 @@ class TrafficNTFEncoder(FairseqEncoder):
         
         input_x = src_tokens
         # from fairseq import pdb; pdb.set_trace()
-        bsz, one_sample_length = input_x.size()
+        # bsz, one_sample_length = input_x.size()
+        bsz, ts, n_seg_var = input_x.size()
         
         one_timestep_size = self.num_segments*self.num_var_per_segment
 
@@ -384,16 +385,16 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
             if random.random() > 0.9995:
                 #from fairseq import pdb; pdb.set_trace()
                 print(input_in)
-                means = (input_in*(self.max_vals+1e-6)).view(18,5).mean(dim=0).cpu().detach().numpy()
+                means = (input_in*(self.max_vals+1e-6)).view(-1,18,5).mean(dim=1).cpu().detach().numpy()
                 print("\n\ninput means\t",means)
                 wandb.log({"input0": wandb.Histogram(means[0])})
                 wandb.log({"input1": wandb.Histogram(means[1])})
                 wandb.log({"input2": wandb.Histogram(means[2])})
                 wandb.log({"input3": wandb.Histogram(means[3])})
-                wandb.log({"input4": wandb.Histogram(means[4])})
-                mean_x = x[j, :, :].view(18,5).mean(dim=0)
+                #wandb.log({"input4": wandb.Histogram(means[4])})
+                mean_x = x[j, :, :].view(-1,18,5).mean(dim=1)
                 print("x[j, :, :] means\t",mean_x.cpu().detach().numpy())
-                mean_feed = input_feed.view(18,5).mean(dim=0)
+                mean_feed = input_feed.view(-1,18,5).mean(dim=1)
                 print("input_feed means\t",mean_feed.cpu().detach().numpy())
             
             # if random.random()>0.0:
