@@ -37,7 +37,7 @@ class TrafficDataset(FairseqDataset):
         print("##Length of Dataset: ",len(self.all_data))
         self.all_data.iloc[:,::5] = self.all_data.iloc[:,::5] * vol_multiple
 
-        self.all_data_pad = pd.read_csv(csv_file.replace('.csv','.csv'),index_col=0)
+        self.all_data_pad = pd.read_csv(csv_file.replace('.csv','_pad.csv'),index_col=0)
         self.all_data_pad.iloc[:,::5] = self.all_data_pad.iloc[:,::5] * vol_multiple
 
         self.seq_len = seq_len
@@ -47,8 +47,8 @@ class TrafficDataset(FairseqDataset):
         self.max_vals[0::5] = 10000.0
         self.max_vals[1::5] = 100.0
         self.max_vals[2::5] = 100.0
-        self.max_vals[3::5] = 100.0
-        self.max_vals[4::5] = 100.0
+        self.max_vals[3::5] = 1000.0
+        self.max_vals[4::5] = 1000.0
         print(self.max_vals)
 
         if split=='train':
@@ -106,7 +106,7 @@ class TrafficDataset(FairseqDataset):
         return F.interpolate(x.view(1, 1, -1), scale_factor=factor).squeeze()
 
     def __len__(self):
-        return len(self.all_data) - 4 * self.seq_len #- self.seq_len# - 1 #- 4* self.seq_len# - 2 * self.seq_len - 1
+        return len(self.all_data) // self.seq_len #- self.seq_len# - 1 #- 4* self.seq_len# - 2 * self.seq_len - 1
 
     def collater(self, samples):
         if len(samples) == 0:
