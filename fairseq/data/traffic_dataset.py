@@ -47,8 +47,8 @@ class TrafficDataset(FairseqDataset):
         self.max_vals[0::5] = 10000.0
         self.max_vals[1::5] = 100.0
         self.max_vals[2::5] = 100.0
-        self.max_vals[3::5] = 100.0
-        self.max_vals[4::5] = 100.0
+        self.max_vals[3::5] = 1000.0
+        self.max_vals[4::5] = 1000.0
         print(self.max_vals)
 
         if split=='train':
@@ -112,6 +112,7 @@ class TrafficDataset(FairseqDataset):
 
     def __len__(self):
         return len(self.all_data) // self.seq_len - 1#self.seq_len#- self.seq_len# - 1 #- 4* self.seq_len# - 2 * self.seq_len - 1
+
 
     def collater(self, samples):
         if len(samples) == 0:

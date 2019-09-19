@@ -48,12 +48,12 @@ class MSECriterion(FairseqCriterion):
         #target = target#.view(-1)
         target_mask = target > -1e-6
         # print("mask sum",target_mask.float().sum(),target.sum())
-        loss = torch.sqrt(F.mse_loss(#F.l1_loss(# F.mse_loss(
+        loss = 1e4*torch.sqrt(F.mse_loss(#F.l1_loss(# F.mse_loss(
             lprobs*target_mask.float(), 
             target*target_mask.float(),
             reduction='sum'
             ))
-        loss = 1e6 * loss  / target_mask.float().sum()
+        loss = loss  / target_mask.float().sum()
         # loss = F.nll_loss(
         #     lprobs,
         #     target,

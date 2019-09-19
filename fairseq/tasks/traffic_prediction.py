@@ -46,7 +46,7 @@ class TrafficPredictionTask(FairseqTask):
         """Load a given dataset split (e.g., train, valid, test)."""
 
         self.seq_len = 360
-        data_file = os.path.join(self.args.data, '{}.csv'.format('november_jan_raw'))#split))
+        data_file = os.path.join(self.args.data, '{}.csv'.format('sh1n_noramp'))#split))
         self.datasets[split] = TrafficDataset(data_file,seq_len=self.seq_len, train_size=48000,split=split)
         #if split=='train':
         self.max_vals = self.datasets[split].get_max_vals()
