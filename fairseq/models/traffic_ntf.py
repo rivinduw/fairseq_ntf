@@ -369,7 +369,8 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
             if self.encoder_hidden_proj is not None:
                 prev_hiddens = [self.encoder_hidden_proj(x) for x in prev_hiddens]
                 prev_cells = [self.encoder_cell_proj(x) for x in prev_cells]
-            input_feed = x.new_ones(bsz, self.hidden_size) * 0.5 
+            input_feed = x.new_ones(bsz, self.hidden_size) * encoder_outs[-1,:bsz,:self.hidden_size]#[0.5,0.1,1.0,0.0,0.0]#0.5 
+            input_feed = nn.functional.relu(input_feed)
 
         attn_scores = x.new_zeros(srclen, seqlen, bsz)#x.new_zeros(segment_units, seqlen, bsz)  #x.new_zeros(srclen, seqlen, bsz)
         outs = []
@@ -377,7 +378,7 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
         for j in range(seqlen):
             # from fairseq import pdb; pdb.set_trace()
             # input feeding: concatenate context vector from previous time step
-            input_mask = x[j, :, :] > -1e-6
+            input_mask = x[j, :, :] > 0.#-1e-6
             input_in = (x[j, :, :]*input_mask.float()) + ( (1-input_mask.float())*input_feed)
             #input = torch.clamp(input, min=-1.0, max=1.0)
             #import pdb; pdb.set_trace()
@@ -386,10 +387,10 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
                 #from fairseq import pdb; pdb.set_trace()
                 means = (input_in*(self.max_vals+1e-6)).view(-1,18,5).mean(dim=1).cpu().detach().numpy()
                 print("\n\ninput means\t",means)
-                wandb.log({"input0": wandb.Histogram(means[0])})
-                wandb.log({"input1": wandb.Histogram(means[1])})
-                wandb.log({"input2": wandb.Histogram(means[2])})
-                wandb.log({"input3": wandb.Histogram(means[3])})
+                wandb.log({"input0": wandb.Histogram(means[:,0])})
+                wandb.log({"input1": wandb.Histogram(means[:,1])})
+                wandb.log({"input2": wandb.Histogram(means[:,2])})
+                wandb.log({"input3": wandb.Histogram(means[:,3])})
                 #wandb.log({"input4": wandb.Histogram(means[4])})
                 mean_x = x[j, :, :].view(-1,18,5).mean(dim=1)
                 print("x[j, :, :] means\t",mean_x.cpu().detach().numpy())
@@ -406,7 +407,7 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
                 hidden, cell = rnn(input, (prev_hiddens[i], prev_cells[i]))
 
                 # hidden state becomes the input to the next layer
-                input = F.dropout(hidden, p=self.dropout_out, training=self.training)
+                #input = F.dropout(hidden, p=self.dropout_out, training=self.training)
 
                 # save state for next time step
                 prev_hiddens[i] = hidden
@@ -425,7 +426,7 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
             segment_params = segment_params.view((-1,8,self.num_segments))
             segment_params = torch.cat([torch.sigmoid(segment_params[:,:4,:]),torch.tanh(segment_params[:,4:,:])],dim=1)
                                                             # vf, a, rhocr, g, omegar, omegas, epsq, epsv 
-            segment_params =  segment_params* torch.Tensor([[200.0],[2.0],[200.0],[5.0],[100.0],[100.0],[100.0],[10.0]]).to(self.device)
+            segment_params =  segment_params* torch.Tensor([[300.0],[3.0],[500.0],[5.0],[1000.0],[1000.0],[10.0],[10.0]]).to(self.device)
             segment_params = segment_params.permute(0, 2, 1)
             unscaled_input = input_in * self.max_vals
 
@@ -433,11 +434,24 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
             # print("segment_params",segment_params[0,::5,0].mean().item(),segment_params.size())
             #print(unscaled_input)
 
-            out = self.ntf_module(unscaled_input,segment_params,boundry_params)
+            model_steps = []
+            num_steps = 3
+            for ss in range(num_steps):
+                out1 = self.ntf_module(unscaled_input,segment_params,boundry_params)
+                model_steps.append(out1)
+                unscaled_input = out1
+
+            out = torch.stack(model_steps, dim=0).mean(dim=0)
+
+            avg_sum_max_vals = self.max_vals # summing everything above but speed and occ need to be avg
+            # avg_sum_max_vals[1::5] *= num_steps #mean occupancy
+            # avg_sum_max_vals[2::5] *= num_steps #mean speed
+
+            out  = out / (avg_sum_max_vals+1e-6) 
 
             # print(out.mean().item())
 
-            out = out / (self.max_vals+1e-6)
+            #out = out / (self.max_vals+1e-6)
 
             
 
@@ -494,10 +508,10 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
     
     def get_targets(self, sample, net_output):
         """Get targets from either the sample or the net's output."""
-        target =  sample['target']
-        print(target.size())
-        target = target.transpose(1, 2)
-        return target
+        #target =  sample['target']
+        #print(target.size())
+        #target = target.transpose(1, 2)
+        return sample['target']#target
         
 
     def reorder_incremental_state(self, incremental_state, new_order):

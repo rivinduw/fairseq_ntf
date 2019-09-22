@@ -46,7 +46,7 @@ class MSECriterion(FairseqCriterion):
         #from fairseq import pdb; pdb.set_trace();
         #target = target.transpose(0, 1)
         #target = target#.view(-1)
-        target_mask = target > -1e-6
+        target_mask = target > 1e-6
         # print("mask sum",target_mask.float().sum(),target.sum())
         loss = 1e4*torch.sqrt(F.mse_loss(#F.l1_loss(# F.mse_loss(
             lprobs*target_mask.float(), 

@@ -37,7 +37,7 @@ class TrafficDataset(FairseqDataset):
         print("##Length of Dataset: ",len(self.all_data))
         self.all_data.iloc[:,::5] = self.all_data.iloc[:,::5] * vol_multiple
 
-        self.all_data_pad = pd.read_csv(csv_file.replace('.csv','_pad.csv'),index_col=0)
+        self.all_data_pad = pd.read_csv(csv_file.replace('.csv','.csv'),index_col=0)
         self.all_data_pad.iloc[:,::5] = self.all_data_pad.iloc[:,::5] * vol_multiple
 
         self.seq_len = seq_len
@@ -57,7 +57,7 @@ class TrafficDataset(FairseqDataset):
             print("###Length of Dataset: ",len(self.all_data))
         elif split=='valid':
             print("valid SET")
-            self.all_data = self.all_data.iloc[self.train_size:self.train_size+valid_size,:]
+            self.all_data =0.0* self.all_data.iloc[self.train_size:self.train_size+valid_size,:]
             self.all_data_pad = self.all_data_pad.iloc[self.train_size:self.train_size+valid_size,:]
             print("###Length of Dataset: ",len(self.all_data))
         else:
@@ -98,6 +98,7 @@ class TrafficDataset(FairseqDataset):
         if self.scale_output:
           one_label = one_label/self.max_vals
         #one_label = np.reshape(one_label,-1)
+        one_label = one_label.transpose(1, 2)
 
         # print(one_label.size())
         # from fairseq import pdb; pdb.set_trace()
