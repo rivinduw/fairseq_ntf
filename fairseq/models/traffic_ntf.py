@@ -288,7 +288,7 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
             self.encoder_cell_proj = Linear(encoder_output_units, hidden_size)
         else:
             self.encoder_hidden_proj = self.encoder_cell_proj = None
-        
+        #num_layers=3
         self.layers = nn.ModuleList([
             LSTMCell(
                 input_size=self.input_size if layer == 0 else hidden_size,#hidden_size + 
@@ -312,8 +312,8 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
         
         
 
-        #self.segment_fixed = torch.Tensor([[582.0/1000.,3.],[318.0/1000.,4.],[703.0/1000.,4.],[ 387.0/1000.,4.],[ 300.0/1000.,5.],[ 348.0/1000.,5.],[ 375.0/1000.,4.],[ 300.0/1000.,4.],[ 257.0/1000.,4.],[ 500.0/1000.,4.],[ 484.0/1000.,4.],[ 400.0/1000.,3.],[ 420.0/1000.,3.],[ 589.0/1000.,3.],[ 427./1000.,3.],[ 400.0/1000.,2.],[ 515.0/1000.,2.0],[ 495.0/1000.,3.0]]).to(self.device)#torch.Tensor(self.num_segments, 2)
-        self.segment_fixed = torch.Tensor([[0.57237,3.],[0.92267,3.],[0.4238,3.],[0.8092,3.],[1.183,3.],[1.5899,3.],[0.2161,3.],[0.88367,3.],[0.59879,3.],[0.91263,3.],[0.672,3.],[1.7492,3.],[0.28183,3.],[0.85799,3.],[1.0847,3.],[1.1839,3.],[0.56727,3.],[0.5147,3.]]).to(self.device)
+        self.segment_fixed = torch.Tensor([[582.0/1000.,3.],[318.0/1000.,4.],[703.0/1000.,4.],[ 387.0/1000.,4.],[ 300.0/1000.,5.],[ 348.0/1000.,5.],[ 375.0/1000.,4.],[ 300.0/1000.,4.],[ 257.0/1000.,4.],[ 500.0/1000.,4.],[ 484.0/1000.,4.],[ 400.0/1000.,3.],[ 420.0/1000.,3.],[ 589.0/1000.,3.],[ 427./1000.,3.],[ 400.0/1000.,2.],[ 515.0/1000.,2.0],[ 495.0/1000.,3.0]]).to(self.device)#torch.Tensor(self.num_segments, 2)
+        #self.segment_fixed = torch.Tensor([[0.57237,3.],[0.92267,3.],[0.4238,3.],[0.8092,3.],[1.183,3.],[1.5899,3.],[0.2161,3.],[0.88367,3.],[0.59879,3.],[0.91263,3.],[0.672,3.],[1.7492,3.],[0.28183,3.],[0.85799,3.],[1.0847,3.],[1.1839,3.],[0.56727,3.],[0.5147,3.]]).to(self.device)
         self.model_fixed = torch.Tensor([[10./3600.,17./3600.,23.,1.7,13.]]).to(self.device)
 
         num_boundry = 3
@@ -378,7 +378,8 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
         for j in range(seqlen):
             # from fairseq import pdb; pdb.set_trace()
             # input feeding: concatenate context vector from previous time step
-            input_mask = x[j, :, :] > 0.#-1e-6
+            input_d = F.dropout(x[j, :, :], p=self.dropout_out, training=self.training)
+            input_mask = input_d > 1e-6#0.#-1e-6
             input_in = (x[j, :, :]*input_mask.float()) + ( (1-input_mask.float())*input_feed)
             #input = torch.clamp(input, min=-1.0, max=1.0)
             #import pdb; pdb.set_trace()
@@ -422,11 +423,11 @@ class TrafficNTFDecoder(FairseqIncrementalDecoder):
             ntf_input = self.ntf_projection(out)
             boundry_params, segment_params = torch.split(ntf_input, [3,8*self.num_segments],dim=1)
             # boundry_params = torch.Tensor([200.0,10000.0,200.0]).to(self.device)*torch.sigmoid(boundry_params)
-            boundry_params = torch.Tensor([200.0,10000.0,200.0]).to(self.device)*torch.sigmoid(boundry_params)
+            boundry_params = torch.Tensor([200.0,10000.0,100.0]).to(self.device)*torch.sigmoid(boundry_params)
             segment_params = segment_params.view((-1,8,self.num_segments))
             segment_params = torch.cat([torch.sigmoid(segment_params[:,:4,:]),torch.tanh(segment_params[:,4:,:])],dim=1)
                                                             # vf, a, rhocr, g, omegar, omegas, epsq, epsv 
-            segment_params =  segment_params* torch.Tensor([[300.0],[3.0],[500.0],[5.0],[1000.0],[1000.0],[10.0],[10.0]]).to(self.device)
+            segment_params =  segment_params* torch.Tensor([[120.0],[2.0],[100.0],[5.0],[1000.0],[1000.0],[10.0],[10.0]]).to(self.device)
             segment_params = segment_params.permute(0, 2, 1)
             unscaled_input = input_in * self.max_vals
 
