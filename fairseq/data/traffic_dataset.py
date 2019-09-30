@@ -23,8 +23,8 @@ from itertools import cycle, islice
 
 class TrafficDataset(FairseqDataset):
     def __init__(self, csv_file, seq_len=360, train_size=48000,vol_multiple = 1.0,
-                scale_input = True, scale_output = True,
-                shuffle=True, input_feeding=True,
+                scale_input = True, scale_output = True, input_seq_len=1440,
+                shuffle=True, input_feeding=True, 
                 max_sample_size=None, min_sample_size=None,split='train'
                 ):
         super().__init__()
@@ -44,6 +44,7 @@ class TrafficDataset(FairseqDataset):
         self.all_data_pad.iloc[:,::5] = self.all_data_pad.iloc[:,::5] * vol_multiple
 
         self.seq_len = seq_len
+        self.input_seq_len = input_seq_len
         # self.train_size = len(self.all_data)//3
 
         self.max_vals = self.all_data.iloc[:self.train_size,:].max().values+1.0
@@ -60,7 +61,7 @@ class TrafficDataset(FairseqDataset):
             print("###Length of Dataset: ",len(self.all_data))
         elif split=='valid':
             print("valid SET")
-            self.all_data = 0.5* self.all_data.iloc[self.train_size:self.train_size+valid_size,:]
+            self.all_data =self.all_data.iloc[self.train_size:self.train_size+valid_size,:]
             self.all_data_pad = self.all_data_pad.iloc[self.train_size:self.train_size+valid_size,:]
             print("###Length of Dataset: ",len(self.all_data))
         else:
@@ -84,20 +85,20 @@ class TrafficDataset(FairseqDataset):
 
         #from fairseq import pdb; pdb.set_trace()
 
-        #rand = torch.randint(0, 360, (1,))[0].item()#0#torch.randint(0, self.seq_len, (1,))[0].item()
-        idx = index*10#* self.seq_len#(index+rand) #* self.seq_len
+        #rand = torch.randint(0, self.seq_len, (1,))[0].item()#0#torch.randint(0, self.seq_len, (1,))[0].item()
+        idx = index#* self.seq_len + rand#(index+rand) #* self.seq_len
 
-        input_len = self.seq_len
+        input_len = self.input_seq_len
         label_len = self.seq_len
 
         NEG = -1e-3
 
-        one_input = self.all_data_pad.iloc[idx:idx+self.seq_len, :].values
+        one_input = self.all_data_pad.iloc[idx:idx+input_len, :].values
         if self.scale_input:
           one_input = one_input/self.max_vals
         #one_input = np.reshape(one_input,-1)
         
-        one_label = self.all_data.iloc[idx+self.seq_len:idx+self.seq_len+label_len, :].values
+        one_label = self.all_data.iloc[idx+input_len:idx+input_len+label_len, :].values
         if self.scale_output:
           one_label = one_label/self.max_vals
         #one_label = np.reshape(one_label,-1)
@@ -115,7 +116,7 @@ class TrafficDataset(FairseqDataset):
         return F.interpolate(x.view(1, 1, -1), scale_factor=factor).squeeze()
 
     def __len__(self):
-        return len(self.all_data) // 20#*self.seq_len - 1#self.seq_len#- self.seq_len# - 1 #- 4* self.seq_len# - 2 * self.seq_len - 1
+        return len(self.all_data) - (2*self.seq_len+self.input_seq_len) - 1#self.seq_len#- self.seq_len# - 1 #- 4* self.seq_len# - 2 * self.seq_len - 1
 
 
     def collater(self, samples):

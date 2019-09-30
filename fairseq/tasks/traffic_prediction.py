@@ -13,6 +13,8 @@ import wandb
 # python train.py data --task traffic_prediction --arch lstm_traffic --criterion mse_loss --batch-size 16
 # C:\Users\rwe180\Documents\python-scripts\pytorch\pyNTF\ 
 
+#python train.py 'data' --task traffic_prediction --criterion mse_loss --arch NTF_traffic --batch-size 8 --optimizer adam --lr 4e-3  --max-tokens 42000 --clip-norm 5.0 --warmup-updates 10 --lr-scheduler inverse_sqrt --update-freq 8
+
 @register_task('traffic_prediction')
 class TrafficPredictionTask(FairseqTask):
 
@@ -45,16 +47,23 @@ class TrafficPredictionTask(FairseqTask):
     def load_dataset(self, split, **kwargs):
         """Load a given dataset split (e.g., train, valid, test)."""
 
-        self.seq_len = 360
-        data_file = os.path.join(self.args.data, '{}.csv'.format('jan_mar_30s'))#split))
-        self.datasets[split] = TrafficDataset(data_file,seq_len=self.seq_len, train_size=48000,split=split)
+        self.seq_len = 10
+        self.input_seq_len=1440
+        data_file = os.path.join(self.args.data, '{}.csv'.format('jan_mar_30s_pad'))#split))
+        self.datasets[split] = TrafficDataset(data_file,seq_len=self.seq_len, train_size=48000,split=split,input_seq_len=1440)
         #if split=='train':
         self.max_vals = self.datasets[split].get_max_vals()
 
         print('| {} {} {} examples'.format(self.args.data, split, len(self.datasets[split])))
     
     def get_max_vals(self):
-        return self.max_vals       
+        return self.max_vals
+    
+    def get_seq_len(self):
+        return self.seq_len
+
+    def get_input_seq_len(self):
+        return self.input_seq_len 
 
     def max_positions(self):
         """Return the max input length allowed by the task."""
@@ -88,9 +97,9 @@ class TrafficPredictionTask(FairseqTask):
                     # plt.pause(0.1)
                     print(net_output[0].size())
                     
-                    preds = net_output[0].view(-1,360,90).detach().cpu().numpy()#[0,:,0]#model.get_normalized_probs(net_output, log_probs=True).float()
-                    src = sample['net_input']['src_tokens'].view(-1,360,90).detach().cpu().numpy()#[0,:,0]# model.get_targets(sample, net_output).float()
-                    target = sample['target'].view(-1,360,90).detach().cpu().numpy()
+                    preds = net_output[0].view(-1,self.seq_len,90).detach().cpu().numpy()#[0,:,0]#model.get_normalized_probs(net_output, log_probs=True).float()
+                    src = sample['net_input']['src_tokens'].view(-1,self.seq_len,90).detach().cpu().numpy()#[0,:,0]# model.get_targets(sample, net_output).float()
+                    target = sample['target'].view(-1,self.seq_len,90).detach().cpu().numpy()
                     for i in range(2):
                         for seg in range(0,10):
                             ax = pd.DataFrame(preds[i,:,seg*1]).plot()
@@ -102,14 +111,16 @@ class TrafficPredictionTask(FairseqTask):
                             plt.pause(0.1)
                             try:
                                 wandb.log({"chart"+str(i)+"_"+str(seg): plt})
-                            except:
-                                pass
+                            except Exception as e:
+                                print(e)
                         plt.pause(2.0)
                         plt.close('all')
                     plt.pause(5.0)
                     plt.close('all')
-            except:
-                pass
+                    # wandb.save('checkpoints/checkpoint_best.pt')
+                    # wandb.save('checkpoints/checkpoint_last.pt')
+            except Exception as e:
+                print(e)
         return loss, sample_size, logging_output
 
     def train_step(self, sample, model, criterion, optimizer, ignore_grad=False):
